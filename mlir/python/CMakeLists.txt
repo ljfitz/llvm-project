@@ -351,6 +351,18 @@ declare_mlir_python_extension(MLIRPythonExtension.Dialects.SparseTensor.Pybind
     MLIRCAPISparseTensor
 )
 
+declare_mlir_python_extension(MLIRPythonExtension.AllPassesRegistration
+  MODULE_NAME _mlirAllPassesRegistration
+  ROOT_DIR "${PYTHON_SOURCE_DIR}"
+  SOURCES
+    AllPassesRegistration.cpp
+  PRIVATE_LINK_LIBS
+    LLVMSupport
+  EMBED_CAPI_LINK_LIBS
+    MLIRCAPIConversion
+    MLIRCAPITransforms
+)
+
 declare_mlir_python_extension(MLIRPythonExtension.AsyncDialectPasses
   MODULE_NAME _mlirAsyncPasses
   ADD_TO_PARENT MLIRPythonSources.Dialects.async_dialect

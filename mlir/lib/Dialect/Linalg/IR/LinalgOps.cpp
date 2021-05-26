@@ -731,10 +731,10 @@ void FusedOp::print(OpAsmPrinter &p) {
 ParseResult FusedOp::parse(OpAsmParser &p, OperationState &state) {
   SmallVector<OpAsmParser::UnresolvedOperand> captures;
   SmallVector<Type> captureTypes;
-  SmallVector<OpAsmParser::UnresolvedOperand> captureArgs;
+  SmallVector<OpAsmParser::Argument> captureArgs;
 
   // (%arg0 = %capture0 : type, ...)
-  if (p.parseAssignmentListWithTypes(captureArgs, captures, captureTypes))
+  if (p.parseAssignmentList(captureArgs, captures))
     return failure();
   if (p.resolveOperands(captures, captureTypes, p.getNameLoc(), state.operands))
     return failure();
@@ -744,8 +744,7 @@ ParseResult FusedOp::parse(OpAsmParser &p, OperationState &state) {
     return failure();
 
   // { ... }
-  if (p.parseRegion(*state.addRegion(), captureArgs, captureTypes,
-                    ArrayRef<Location>{}, true))
+  if (p.parseRegion(*state.addRegion(), captureArgs, true))
     return failure();
 
   // -> type
@@ -946,8 +945,8 @@ void FusedOp::getEffects(SmallVectorImpl<MemoryEffect> &effects) {
   }
 }
 
-OperandRange FusedOp::getSuccessorEntryOperands(unsigned index) {
-  assert(index == 0 && "invalid region index");
+OperandRange FusedOp::getSuccessorEntryOperands(Optional<unsigned> index) {
+  assert(index.getValue() == 0 && "invalid region index");
 
   // The body takes the captured values.
   return captures();
