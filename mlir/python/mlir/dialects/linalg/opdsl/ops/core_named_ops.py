@@ -54,49 +54,38 @@ def conv_2d_lrelu(
            ]) * cast(U, K[D.f, D.c, D.kh, D.kw]))
 
 @linalg_structured_op
-def copy(I=TensorDef(T1),
-         O=TensorDef(U, output=True),
-         cast=TypeFnAttrDef(default=TypeFn.cast_signed)):
-  """Copies the tensor elementwise.
+def conv_2d_lrelu_maxpool(
+    I=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
+    K=TensorDef(T2, S.F, S.C, S.KH, S.KW),
+    B=TensorDef(T3, S.F),
+    alpha=ScalarDef(F32),
+    O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
+    strides=AttributeDef(S.SH, S.SW),
+    dilations=AttributeDef(S.DH, S.DW),
+    mp_kernel_size=AttributeDef(S.MKH, S.MKW),
+    mp_stride=AttributeDef(S.MSH, S.MSW),
+    mp_padding=AttributeDef(S.MPH, S.MPW),
+    mp_dilation=AttributeDef(S.MDH, S.MDW)):
+  """Performs fused 2-D convolution, leaky-relu and max-pool.
 
-  Numeric casting is performed on the input operand, promoting it to the same
-  data type as the accumulator/output.
+  Layout:
+    * Input: NCHW.
+    * Kernel: FCHW.
+
+  Numeric casting is performed on the operands to the inner multiply, promoting
+  them to the same data type as the accumulator/output.
   """
-  O[None] = cast(U, I[None])
-
+  implements(ConvolutionOpInterface)
+  domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw)
+  O[D.n, D.f, D.oh, D.ow] += alpha * (cast(U, B[D.f]) + cast(
+      U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH, D.ow * S.SW + D.kw * S.DW
+           ]) * cast(U, K[D.f, D.c, D.kh, D.kw]))
 
 @linalg_structured_op
-def elemwise_unary(I=TensorDef(T1),
-                   O=TensorDef(U, output=True),
-                   fun=UnaryFnAttrDef(default=UnaryFn.exp),
-                   cast=TypeFnAttrDef(default=TypeFn.cast_signed)):
-  """Applies the unary function fun elementwise.
-
-  Numeric casting is performed on the input operand, promoting it to the same
-  data type as the accumulator/output.
-  """
-  O[None] = fun(cast(U, I[None]))
-
-
-@linalg_structured_op
-def elemwise_binary(lhs=TensorDef(T1),
-                    rhs=TensorDef(T2),
-                    O=TensorDef(U, output=True),
-                    fun=BinaryFnAttrDef(default=BinaryFn.add),
-                    cast=TypeFnAttrDef(default=TypeFn.cast_signed)):
-  """Applies the binary function fun elementwise.
-
-  Numeric casting is performed on the input operand, promoting it to the same
-  data type as the accumulator/output.
-  """
-  O[None] = fun(cast(U, lhs[None]), cast(U, rhs[None]))
-
-
-@linalg_structured_op
-def matmul(A=TensorDef(T1, S.M, S.K),
-           B=TensorDef(T2, S.K, S.N),
-           C=TensorDef(U, S.M, S.N, output=True),
-           cast=TypeFnAttrDef(default=TypeFn.cast_signed)):
+def matmul(
+    A=TensorDef(T1, S.M, S.K),
+    B=TensorDef(T2, S.K, S.N),
+    C=TensorDef(U, S.M, S.N, output=True)):
   """Performs a matrix multiplication of two 2D inputs.
 
   Numeric casting is performed on the operands to the inner multiply, promoting
