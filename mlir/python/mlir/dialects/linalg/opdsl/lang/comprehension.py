@@ -681,6 +681,232 @@ class Comprehension:
     return f"{defs_repr} = {values_repr}"
 
 
+class TypeFnType:
+  """Type conversion function.
+
+  A type conversion function takes a target type and a tensor expression and
+  returns the casted tensor expression.
+  """
+
+  def __init__(self, fn_name: str):
+    self.fn_name = fn_name
+
+  def __call__(self, type_var: TypeVar,
+               arg: TensorExpression) -> "TensorTypeFn":
+    return TensorTypeFn(self, type_var, arg)
+
+  def __repr__(self):
+    return f"{self.fn_name}"
+
+
+class TypeFn:
+  """Type conversion function namespace.
+
+  As the integer types are signless, signedness is implement by different cast
+  functions that treat integers as signed (`cast`) or unsigned
+  (`cast_unsigned`) values.
+
+  Examples:
+  - cast(I32 -> I64) -> `arith.ExtSIOp`
+  - cast_unsigned(I32 -> I64) -> `arith.ExtUIOp`
+  """
+  cast = TypeFnType("cast")
+  cast_unsigned = TypeFnType("cast_unsigned")
+
+
+class ArithFnType:
+  """Arithmetic function.
+
+  An arithmetic function takes one ore more tensor expressions and returns the
+  function evaluation result.
+  """
+
+  def __init__(self, fn_name: str):
+    self.fn_name = fn_name
+
+  def __call__(self, *args) -> "TensorArithFn":
+    return TensorArithFn(self, args)
+
+  def __repr__(self):
+    return f"{self.fn_name}"
+
+
+class ArithFn:
+  """Arithmetic function namespace.
+
+  As the integer types are signless, signedness is implement by different
+  functions that treat integers as signed or unsigned values.
+
+  Examples:
+  - max -> `arith.MaxSIOp`
+  - max_unsinged -> `arith.MaxUIOp`
+  """
+  add = ArithFnType("add")
+  exp = ArithFnType("exp")
+  log = ArithFnType("log")
+  mul = ArithFnType("mul")
+  max = ArithFnType("max")
+  min = ArithFnType("min")
+  sub = ArithFnType("sub")
+  max_unsigned = ArithFnType("max_unsigned")
+  min_unsigned = ArithFnType("min_unsigned")
+
+
+class ReduceFnUse:
+  """Reduction function use.
+
+  A reduction use specifies the reduction function and dimensions.
+  """
+
+  def __init__(self, arith_fn: ArithFnType, *reduce_dims: DimDef):
+    self.arith_fn = arith_fn
+    self.reduce_dims = reduce_dims
+
+  def __call__(self, *args: TensorExpression):
+    return TensorReduceFn(self, args)
+
+  def __repr__(self):
+    return (f"reduce_{self.arith_fn.fn_name}"
+            f"({', '.join(repr(d) for d in self.reduce_dims)})")
+
+
+class ReduceFnType:
+  """Reduction function.
+
+  An arithmetic function that reduces its RHS into its LHS.
+  """
+
+  def __init__(self, arith_fn: ArithFnType):
+    if not isinstance(arith_fn, ArithFnType):
+      raise ValueError(f"Reduce expected a ArithFnType but got {arith_fn}")
+    self.arith_fn = arith_fn
+
+  def __getitem__(self, reduce_dims: Tuple[DimDef]) -> ReduceFnUse:
+    return ReduceFnUse(self.arith_fn, *reduce_dims)
+
+  def __repr__(self):
+    return (f"reduce_{self.arith_fn.fn_name}")
+
+
+class ReduceFn:
+  add = ReduceFnType(ArithFn.add)
+  mul = ReduceFnType(ArithFn.mul)
+  max = ReduceFnType(ArithFn.max)
+  min = ReduceFnType(ArithFn.min)
+  max_unsigned = ReduceFnType(ArithFn.max_unsigned)
+  min_unsigned = ReduceFnType(ArithFn.min_unsigned)
+
+
+class TensorArithFn(TensorExpression):
+  """Application of an arithmetic function."""
+
+  def __init__(self, arith_fn: ArithFnType, args: Sequence[TensorExpression]):
+    self.arith_fn = arith_fn
+    self.args = tuple(args)
+
+  def to_scalar_expression(self) -> ScalarExpression:
+    return ScalarArithFn(self.arith_fn.fn_name,
+                         *[arg.to_scalar_expression() for arg in self.args
+                          ]).expr()
+
+  def visit_tensor_exprs(self, callback):
+    super().visit_tensor_exprs(callback)
+    for arg in self.args:
+      arg.visit_tensor_exprs(callback)
+
+  def __repr__(self):
+    return f"{repr(self.arith_fn)}({', '.join(repr(a) for a in self.args)})"
+
+
+class TensorTypeFn(TensorExpression):
+  """Application of a type conversion function."""
+
+  def __init__(self, type_fn: TypeFn, type_var: TypeVar, arg: TensorExpression):
+    self.type_fn = type_fn
+    self.type_var = type_var
+    self.arg = arg
+
+  def to_scalar_expression(self) -> ScalarExpression:
+    return ScalarTypeFn(self.type_fn.fn_name, self.type_var,
+                        self.arg.to_scalar_expression()).expr()
+
+  def visit_tensor_exprs(self, callback):
+    super().visit_tensor_exprs(callback)
+    self.arg.visit_tensor_exprs(callback)
+
+  def __repr__(self):
+    return f"{repr(self.type_fn)}({self.type_var}, {self.arg})"
+
+
+class const(TensorExpression):
+  """Returns the given constant floating point or integer value."""
+
+  def __init__(self, value: Any):
+    with _ir.Context():
+      if isinstance(value, float):
+        self.value = str(_ir.FloatAttr.get_f64(float(value)))
+      elif isinstance(value, int):
+        self.value = str(
+            _ir.IntegerAttr.get(_ir.IntegerType.get_signless(64), int(value)))
+      else:
+        raise ValueError(f"const requires int or float but got {type(value)}")
+
+  def to_scalar_expression(self) -> ScalarExpression:
+    return ScalarConst(self.value).expr()
+
+  def __repr__(self):
+    return f"const({self.value})"
+
+
+class index(TensorExpression):
+  """Returns the iteration index for a given dimension name.
+
+  Resolves the given dimension name to obtain its position in the iteration
+  domain of the operation.
+  """
+
+  def __init__(self, dim: DimDef):
+    self.dim_def = dim
+    self.dim = -1
+
+  def resolve_dimension_name(self, affine_state: AffineBuildState):
+    self.dim = affine_state.get_dim(self.dim_def.dimname)
+
+  def to_scalar_expression(self) -> ScalarExpression:
+    assert self.dim != -1, "Dimension name not resolved"
+    return ScalarIndex(self.dim).expr()
+
+  def __repr__(self):
+    return f"index({repr(self.dim)})"
+
+
+class TensorReduceFn(TensorExpression):
+  """Application of a reduction function.
+
+  This captures the lhs (initial value) separately from the rhs.
+  """
+
+  def __init__(self, reduce_use: ReduceFnUse, args: Sequence[TensorExpression]):
+    self.reduce_use = reduce_use
+    self.lhs = None  # type: Optional[TensorUse]
+    self.args = tuple(args)
+
+  def to_scalar_expression(self) -> ScalarExpression:
+    if self.lhs is None:
+      raise ValueError(f"Cannot scalarize a TensorReduceFn that has not been "
+                       f"bound to its lhs: {self}")
+    full_args = [self.lhs.to_scalar_expression()
+                ] + [arg.to_scalar_expression() for arg in self.args]
+    return ScalarArithFn(self.reduce_use.arith_fn.fn_name, *full_args).expr()
+
+  def visit_tensor_exprs(self, callback):
+    for arg in self.args:
+      arg.visit_tensor_exprs(callback)
+
+  def __repr__(self):
+    return f"{repr(self.reduce_use)}({', '.join(repr(a) for a in self.args)})"
+
+
 class OpInterfaceDef:
   """An interface that an op implements."""
 
