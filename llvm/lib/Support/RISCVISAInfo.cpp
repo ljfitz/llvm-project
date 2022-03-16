@@ -48,6 +48,8 @@ static const RISCVSupportedExtension SupportedExtensions[] = {
     {"d", RISCVExtensionVersion{2, 0}},
     {"c", RISCVExtensionVersion{2, 0}},
 
+    {"zihintpause", RISCVExtensionVersion{2, 0}},
+
     {"zfhmin", RISCVExtensionVersion{1, 0}},
     {"zfh", RISCVExtensionVersion{1, 0}},
 
@@ -461,15 +463,7 @@ RISCVISAInfo::parseFeatures(unsigned XLen,
       ISAInfo->Exts.erase(ExtName.str());
   }
 
-  ISAInfo->updateImplication();
-  ISAInfo->updateFLen();
-  ISAInfo->updateMinVLen();
-  ISAInfo->updateMaxELen();
-
-  if (Error Result = ISAInfo->checkDependency())
-    return std::move(Result);
-
-  return std::move(ISAInfo);
+  return RISCVISAInfo::postProcessAndChecking(std::move(ISAInfo));
 }
 
 llvm::Expected<std::unique_ptr<RISCVISAInfo>>
@@ -686,15 +680,7 @@ RISCVISAInfo::parseArchString(StringRef Arch, bool EnableExperimentalExtension,
     }
   }
 
-  ISAInfo->updateImplication();
-  ISAInfo->updateFLen();
-  ISAInfo->updateMinVLen();
-  ISAInfo->updateMaxELen();
-
-  if (Error Result = ISAInfo->checkDependency())
-    return std::move(Result);
-
-  return std::move(ISAInfo);
+  return RISCVISAInfo::postProcessAndChecking(std::move(ISAInfo));
 }
 
 Error RISCVISAInfo::checkDependency() {
@@ -702,11 +688,9 @@ Error RISCVISAInfo::checkDependency() {
   bool HasE = Exts.count("e") != 0;
   bool HasD = Exts.count("d") != 0;
   bool HasF = Exts.count("f") != 0;
-  bool HasZve32x = Exts.count("zve32x") != 0;
+  bool HasVector = Exts.count("zve32x") != 0;
   bool HasZve32f = Exts.count("zve32f") != 0;
   bool HasZve64d = Exts.count("zve64d") != 0;
-  bool HasV = Exts.count("v") != 0;
-  bool HasVector = HasZve32x || HasV;
   bool HasZvl = MinVLen != 0;
 
   if (HasE && !IsRv32)
@@ -739,12 +723,6 @@ Error RISCVISAInfo::checkDependency() {
         errc::invalid_argument,
         "zvl*b requires v or zve* extension to also be specified");
 
-  // Could not implement Zve* extension and the V extension at the same time.
-  if (HasZve32x && HasV)
-    return createStringError(
-        errc::invalid_argument,
-        "It is illegal to specify the v extension with zve* extensions");
-
   // Additional dependency checks.
   // TODO: The 'q' extension requires rv64.
   // TODO: It is illegal to specify 'e' extensions with 'f' and 'd'.
@@ -752,8 +730,9 @@ Error RISCVISAInfo::checkDependency() {
   return Error::success();
 }
 
-static const char *ImpliedExtsV[] = {"zvl128b", "f", "d"};
-static const char *ImpliedExtsZfh[] = {"zfhmin"};
+static const char *ImpliedExtsV[] = {"zvl128b", "zve64d", "f", "d"};
+static const char *ImpliedExtsZfhmin[] = {"f"};
+static const char *ImpliedExtsZfh[] = {"f"};
 static const char *ImpliedExtsZve64d[] = {"zve64f"};
 static const char *ImpliedExtsZve64f[] = {"zve64x", "zve32f"};
 static const char *ImpliedExtsZve64x[] = {"zve32x", "zvl64b"};
@@ -785,9 +764,11 @@ struct ImpliedExtsEntry {
   bool operator<(StringRef Other) const { return Name < Other; }
 };
 
+// Note: The table needs to be sorted by name.
 static constexpr ImpliedExtsEntry ImpliedExts[] = {
     {{"v"}, {ImpliedExtsV}},
     {{"zfh"}, {ImpliedExtsZfh}},
+    {{"zfhmin"}, {ImpliedExtsZfhmin}},
     {{"zk"}, {ImpliedExtsZk}},
     {{"zkn"}, {ImpliedExtsZkn}},
     {{"zks"}, {ImpliedExtsZks}},
@@ -881,11 +862,6 @@ void RISCVISAInfo::updateMaxELen() {
       ExtName.getAsInteger(10, ZveELen);
       MaxELen = std::max(MaxELen, ZveELen);
     }
-    if (ExtName == "v") {
-      MaxELenFp = 64;
-      MaxELen = 64;
-      return;
-    }
   }
 }
 
@@ -918,4 +894,31 @@ std::vector<std::string> RISCVISAInfo::toFeatureVector() const {
     FeatureVector.push_back(Feature);
   }
   return FeatureVector;
+}
+
+llvm::Expected<std::unique_ptr<RISCVISAInfo>>
+RISCVISAInfo::postProcessAndChecking(std::unique_ptr<RISCVISAInfo> &&ISAInfo) {
+  ISAInfo->updateImplication();
+  ISAInfo->updateFLen();
+  ISAInfo->updateMinVLen();
+  ISAInfo->updateMaxELen();
+
+  if (Error Result = ISAInfo->checkDependency())
+    return std::move(Result);
+  return std::move(ISAInfo);
+}
+
+StringRef RISCVISAInfo::computeDefaultABI() const {
+  if (XLen == 32) {
+    if (hasExtension("d"))
+      return "ilp32d";
+    if (hasExtension("e"))
+      return "ilp32e";
+    return "ilp32";
+  } else if (XLen == 64) {
+    if (hasExtension("d"))
+      return "lp64d";
+    return "lp64";
+  }
+  llvm_unreachable("Invalid XLEN");
 }

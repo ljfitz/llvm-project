@@ -159,7 +159,8 @@ def StdlibAPI : PublicAPI<"stdlib.h"> {
     "lldiv_t",
     "size_t",
     "__bsearchcompare_t",
-    "__qsortcompare_t"
+    "__qsortcompare_t",
+    "__atexithandler_t",
   ];
 }
 
@@ -241,4 +242,8 @@ def ThreadsAPI : PublicAPI<"threads.h"> {
 
 def UniStdAPI : PublicAPI<"unistd.h"> {
   let Types = ["size_t", "ssize_t"];
+}
+
+def SysStatAPI : PublicAPI<"sys/stat.h"> {
+  let Types = ["mode_t"];
 }

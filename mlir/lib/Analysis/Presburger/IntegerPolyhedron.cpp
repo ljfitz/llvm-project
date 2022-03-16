@@ -12,6 +12,7 @@
 
 #include "mlir/Analysis/Presburger/IntegerPolyhedron.h"
 #include "mlir/Analysis/Presburger/LinearTransform.h"
+#include "mlir/Analysis/Presburger/PresburgerSet.h"
 #include "mlir/Analysis/Presburger/Simplex.h"
 #include "mlir/Analysis/Presburger/Utils.h"
 #include "llvm/ADT/DenseMap.h"
@@ -21,7 +22,8 @@
 #define DEBUG_TYPE "presburger"
 
 using namespace mlir;
-using namespace presburger_utils;
+using namespace presburger;
+
 using llvm::SmallDenseMap;
 using llvm::SmallDenseSet;
 
@@ -63,8 +65,56 @@ void IntegerPolyhedron::append(const IntegerPolyhedron &other) {
   }
 }
 
+bool IntegerPolyhedron::isEqual(const IntegerPolyhedron &other) const {
+  return PresburgerSet(*this).isEqual(PresburgerSet(other));
+}
+
+bool IntegerPolyhedron::isSubsetOf(const IntegerPolyhedron &other) const {
+  return PresburgerSet(*this).isSubsetOf(PresburgerSet(other));
+}
+
+MaybeOptimum<SmallVector<Fraction, 8>>
+IntegerPolyhedron::findRationalLexMin() const {
+  assert(getNumSymbolIds() == 0 && "Symbols are not supported!");
+  MaybeOptimum<SmallVector<Fraction, 8>> maybeLexMin =
+      LexSimplex(*this).findRationalLexMin();
+
+  if (!maybeLexMin.isBounded())
+    return maybeLexMin;
+
+  // The Simplex returns the lexmin over all the variables including locals. But
+  // locals are not actually part of the space and should not be returned in the
+  // result. Since the locals are placed last in the list of identifiers, they
+  // will be minimized last in the lexmin. So simply truncating out the locals
+  // from the end of the answer gives the desired lexmin over the dimensions.
+  assert(maybeLexMin->size() == getNumIds() &&
+         "Incorrect number of vars in lexMin!");
+  maybeLexMin->resize(getNumDimAndSymbolIds());
+  return maybeLexMin;
+}
+
+MaybeOptimum<SmallVector<int64_t, 8>>
+IntegerPolyhedron::findIntegerLexMin() const {
+  assert(getNumSymbolIds() == 0 && "Symbols are not supported!");
+  MaybeOptimum<SmallVector<int64_t, 8>> maybeLexMin =
+      LexSimplex(*this).findIntegerLexMin();
+
+  if (!maybeLexMin.isBounded())
+    return maybeLexMin.getKind();
+
+  // The Simplex returns the lexmin over all the variables including locals. But
+  // locals are not actually part of the space and should not be returned in the
+  // result. Since the locals are placed last in the list of identifiers, they
+  // will be minimized last in the lexmin. So simply truncating out the locals
+  // from the end of the answer gives the desired lexmin over the dimensions.
+  assert(maybeLexMin->size() == getNumIds() &&
+         "Incorrect number of vars in lexMin!");
+  maybeLexMin->resize(getNumDimAndSymbolIds());
+  return maybeLexMin;
+}
+
 unsigned IntegerPolyhedron::insertDimId(unsigned pos, unsigned num) {
-  return insertId(IdKind::Dimension, pos, num);
+  return insertId(IdKind::SetDim, pos, num);
 }
 
 unsigned IntegerPolyhedron::insertSymbolId(unsigned pos, unsigned num) {
@@ -78,22 +128,15 @@ unsigned IntegerPolyhedron::insertLocalId(unsigned pos, unsigned num) {
 unsigned IntegerPolyhedron::insertId(IdKind kind, unsigned pos, unsigned num) {
   assert(pos <= getNumIdKind(kind));
 
-  unsigned absolutePos = getIdKindOffset(kind) + pos;
-  if (kind == IdKind::Dimension)
-    numDims += num;
-  else if (kind == IdKind::Symbol)
-    numSymbols += num;
-  numIds += num;
-
-  inequalities.insertColumns(absolutePos, num);
-  equalities.insertColumns(absolutePos, num);
-
-  return absolutePos;
+  unsigned insertPos = PresburgerLocalSpace::insertId(kind, pos, num);
+  inequalities.insertColumns(insertPos, num);
+  equalities.insertColumns(insertPos, num);
+  return insertPos;
 }
 
 unsigned IntegerPolyhedron::appendDimId(unsigned num) {
   unsigned pos = getNumDimIds();
-  insertId(IdKind::Dimension, pos, num);
+  insertId(IdKind::SetDim, pos, num);
   return pos;
 }
 
@@ -137,38 +180,12 @@ void IntegerPolyhedron::removeIdRange(IdKind kind, unsigned idStart,
 }
 
 void IntegerPolyhedron::removeIdRange(unsigned idStart, unsigned idLimit) {
-  assert(idLimit < getNumCols() && "invalid id limit");
+  // Update space paramaters.
+  PresburgerLocalSpace::removeIdRange(idStart, idLimit);
 
-  if (idStart >= idLimit)
-    return;
-
-  // We are going to be removing one or more identifiers from the range.
-  assert(idStart < numIds && "invalid idStart position");
-
-  // TODO: Make 'removeIdRange' a lambda called from here.
   // Remove eliminated identifiers from the constraints..
   equalities.removeColumns(idStart, idLimit - idStart);
   inequalities.removeColumns(idStart, idLimit - idStart);
-
-  // Update members numDims, numSymbols and numIds.
-  unsigned numDimsEliminated = 0;
-  unsigned numLocalsEliminated = 0;
-  unsigned numColsEliminated = idLimit - idStart;
-  if (idStart < numDims) {
-    numDimsEliminated = std::min(numDims, idLimit) - idStart;
-  }
-  // Check how many local id's were removed. Note that our identifier order is
-  // [dims, symbols, locals]. Local id start at position numDims + numSymbols.
-  if (idLimit > numDims + numSymbols) {
-    numLocalsEliminated = std::min(
-        idLimit - std::max(idStart, numDims + numSymbols), getNumLocalIds());
-  }
-  unsigned numSymbolsEliminated =
-      numColsEliminated - numDimsEliminated - numLocalsEliminated;
-
-  numDims -= numDimsEliminated;
-  numSymbols -= numSymbolsEliminated;
-  numIds = numIds - numColsEliminated;
 }
 
 void IntegerPolyhedron::removeEquality(unsigned pos) {
@@ -198,30 +215,8 @@ void IntegerPolyhedron::swapId(unsigned posA, unsigned posB) {
   if (posA == posB)
     return;
 
-  for (unsigned r = 0, e = getNumInequalities(); r < e; r++)
-    std::swap(atIneq(r, posA), atIneq(r, posB));
-  for (unsigned r = 0, e = getNumEqualities(); r < e; r++)
-    std::swap(atEq(r, posA), atEq(r, posB));
-}
-
-unsigned IntegerPolyhedron::getIdKindOffset(IdKind kind) const {
-  if (kind == IdKind::Dimension)
-    return 0;
-  if (kind == IdKind::Symbol)
-    return getNumDimIds();
-  if (kind == IdKind::Local)
-    return getNumDimAndSymbolIds();
-  llvm_unreachable("IdKind expected to be Dimension, Symbol or Local!");
-}
-
-unsigned IntegerPolyhedron::getNumIdKind(IdKind kind) const {
-  if (kind == IdKind::Dimension)
-    return getNumDimIds();
-  if (kind == IdKind::Symbol)
-    return getNumSymbolIds();
-  if (kind == IdKind::Local)
-    return getNumLocalIds();
-  llvm_unreachable("IdKind expected to be Dimension, Symbol or Local!");
+  inequalities.swapColumns(posA, posB);
+  equalities.swapColumns(posA, posB);
 }
 
 void IntegerPolyhedron::clearConstraints() {
@@ -290,7 +285,8 @@ bool IntegerPolyhedron::hasConsistentState() const {
     return false;
 
   // Catches errors where numDims, numSymbols, numIds aren't consistent.
-  if (numDims > numIds || numSymbols > numIds || numDims + numSymbols > numIds)
+  if (getNumDimIds() > getNumIds() || getNumSymbolIds() > getNumIds() ||
+      getNumDimAndSymbolIds() > getNumIds())
     return false;
 
   return true;
@@ -305,12 +301,11 @@ void IntegerPolyhedron::setAndEliminate(unsigned pos,
   // Setting x_j = p in sum_i a_i x_i + c is equivalent to adding p*a_j to the
   // constant term and removing the id x_j. We do this for all the ids
   // pos, pos + 1, ... pos + values.size() - 1.
-  for (unsigned r = 0, e = getNumInequalities(); r < e; r++)
-    for (unsigned i = 0, numVals = values.size(); i < numVals; ++i)
-      atIneq(r, getNumCols() - 1) += atIneq(r, pos + i) * values[i];
-  for (unsigned r = 0, e = getNumEqualities(); r < e; r++)
-    for (unsigned i = 0, numVals = values.size(); i < numVals; ++i)
-      atEq(r, getNumCols() - 1) += atEq(r, pos + i) * values[i];
+  unsigned constantColPos = getNumCols() - 1;
+  for (unsigned i = 0, numVals = values.size(); i < numVals; ++i)
+    inequalities.addToColumn(i + pos, constantColPos, values[i]);
+  for (unsigned i = 0, numVals = values.size(); i < numVals; ++i)
+    equalities.addToColumn(i + pos, constantColPos, values[i]);
   removeIdRange(pos, pos + values.size());
 }
 
@@ -336,35 +331,11 @@ bool IntegerPolyhedron::findConstraintWithNonZeroAt(unsigned colIdx, bool isEq,
   return false;
 }
 
-// Normalizes the coefficient values across all columns in `rowIdx` by their
-// GCD in equality or inequality constraints as specified by `isEq`.
-template <bool isEq>
-static void normalizeConstraintByGCD(IntegerPolyhedron *constraints,
-                                     unsigned rowIdx) {
-  auto at = [&](unsigned colIdx) -> int64_t {
-    return isEq ? constraints->atEq(rowIdx, colIdx)
-                : constraints->atIneq(rowIdx, colIdx);
-  };
-  uint64_t gcd = std::abs(at(0));
-  for (unsigned j = 1, e = constraints->getNumCols(); j < e; ++j) {
-    gcd = llvm::GreatestCommonDivisor64(gcd, std::abs(at(j)));
-  }
-  if (gcd > 0 && gcd != 1) {
-    for (unsigned j = 0, e = constraints->getNumCols(); j < e; ++j) {
-      int64_t v = at(j) / static_cast<int64_t>(gcd);
-      isEq ? constraints->atEq(rowIdx, j) = v
-           : constraints->atIneq(rowIdx, j) = v;
-    }
-  }
-}
-
 void IntegerPolyhedron::normalizeConstraintsByGCD() {
-  for (unsigned i = 0, e = getNumEqualities(); i < e; ++i) {
-    normalizeConstraintByGCD</*isEq=*/true>(this, i);
-  }
-  for (unsigned i = 0, e = getNumInequalities(); i < e; ++i) {
-    normalizeConstraintByGCD</*isEq=*/false>(this, i);
-  }
+  for (unsigned i = 0, e = getNumEqualities(); i < e; ++i)
+    equalities.normalizeRow(i);
+  for (unsigned i = 0, e = getNumInequalities(); i < e; ++i)
+    inequalities.normalizeRow(i);
 }
 
 bool IntegerPolyhedron::hasInvalidConstraint() const {
@@ -834,15 +805,13 @@ void IntegerPolyhedron::getLocalReprs(
     changed = false;
     for (unsigned i = 0, e = getNumLocalIds(); i < e; ++i) {
       if (!foundRepr[i + divOffset]) {
-        auto res = computeSingleVarRepr(*this, foundRepr, divOffset + i,
-                                        dividends[i], denominators[i]);
-        if (res.kind == ReprKind::Inequality) {
-          foundRepr[i + divOffset] = true;
-          repr[i].kind = ReprKind::Inequality;
-          repr[i].repr.inEqualityPair = {res.repr.inEqualityPair.lowerBoundIdx,
-                                         res.repr.inEqualityPair.upperBoundIdx};
-          changed = true;
-        }
+        MaybeLocalRepr res = computeSingleVarRepr(
+            *this, foundRepr, divOffset + i, dividends[i], denominators[i]);
+        if (!res)
+          continue;
+        foundRepr[i + divOffset] = true;
+        repr[i] = res;
+        changed = true;
       }
     }
   } while (changed);
@@ -850,7 +819,7 @@ void IntegerPolyhedron::getLocalReprs(
   // Set 0 denominator for identifiers for which no division representation
   // could be found.
   for (unsigned i = 0, e = repr.size(); i < e; ++i)
-    if (repr[i].kind == ReprKind::None)
+    if (!repr[i])
       denominators[i] = 0;
 }
 
@@ -865,17 +834,10 @@ void IntegerPolyhedron::getLocalReprs(
 void IntegerPolyhedron::gcdTightenInequalities() {
   unsigned numCols = getNumCols();
   for (unsigned i = 0, e = getNumInequalities(); i < e; ++i) {
-    uint64_t gcd = std::abs(atIneq(i, 0));
-    for (unsigned j = 1; j < numCols - 1; ++j) {
-      gcd = llvm::GreatestCommonDivisor64(gcd, std::abs(atIneq(i, j)));
-    }
-    if (gcd > 0 && gcd != 1) {
-      int64_t gcdI = static_cast<int64_t>(gcd);
-      // Tighten the constant term and normalize the constraint by the GCD.
-      atIneq(i, numCols - 1) = mlir::floorDiv(atIneq(i, numCols - 1), gcdI);
-      for (unsigned j = 0, e = numCols - 1; j < e; ++j)
-        atIneq(i, j) /= gcdI;
-    }
+    // Normalize the constraint and tighten the constant term by the GCD.
+    uint64_t gcd = inequalities.normalizeRow(i, getNumCols() - 1);
+    if (gcd > 1)
+      atIneq(i, numCols - 1) = mlir::floorDiv(atIneq(i, numCols - 1), gcd);
   }
 }
 
@@ -884,7 +846,7 @@ void IntegerPolyhedron::gcdTightenInequalities() {
 unsigned IntegerPolyhedron::gaussianEliminateIds(unsigned posStart,
                                                  unsigned posLimit) {
   // Return if identifier positions to eliminate are out of range.
-  assert(posLimit <= numIds);
+  assert(posLimit <= getNumIds());
   assert(hasConsistentState());
 
   if (posStart >= posLimit)
@@ -910,14 +872,14 @@ unsigned IntegerPolyhedron::gaussianEliminateIds(unsigned posStart,
     for (unsigned i = 0, e = getNumEqualities(); i < e; ++i) {
       eliminateFromConstraint(this, i, pivotRow, pivotCol, posStart,
                               /*isEq=*/true);
-      normalizeConstraintByGCD</*isEq=*/true>(this, i);
+      equalities.normalizeRow(i);
     }
 
     // Eliminate identifier at 'pivotCol' from each inequality row.
     for (unsigned i = 0, e = getNumInequalities(); i < e; ++i) {
       eliminateFromConstraint(this, i, pivotRow, pivotCol, posStart,
                               /*isEq=*/false);
-      normalizeConstraintByGCD</*isEq=*/false>(this, i);
+      inequalities.normalizeRow(i);
     }
     removeEquality(pivotRow);
     gcdTightenInequalities();
@@ -927,21 +889,6 @@ unsigned IntegerPolyhedron::gaussianEliminateIds(unsigned posStart,
   // Remove eliminated columns from all constraints.
   removeIdRange(posStart, posLimit);
   return posLimit - posStart;
-}
-
-// Fills an inequality row with the value 'val'.
-static inline void fillInequality(IntegerPolyhedron *cst, unsigned r,
-                                  int64_t val) {
-  for (unsigned c = 0, f = cst->getNumCols(); c < f; c++) {
-    cst->atIneq(r, c) = val;
-  }
-}
-
-// Negates an inequality.
-static inline void negateInequality(IntegerPolyhedron *cst, unsigned r) {
-  for (unsigned c = 0, f = cst->getNumCols(); c < f; c++) {
-    cst->atIneq(r, c) = -cst->atIneq(r, c);
-  }
 }
 
 // A more complex check to eliminate redundant inequalities. Uses FourierMotzkin
@@ -954,32 +901,24 @@ void IntegerPolyhedron::removeRedundantInequalities() {
   IntegerPolyhedron tmpCst(*this);
   for (unsigned r = 0, e = getNumInequalities(); r < e; r++) {
     // Change the inequality to its complement.
-    negateInequality(&tmpCst, r);
+    tmpCst.inequalities.negateRow(r);
     tmpCst.atIneq(r, tmpCst.getNumCols() - 1)--;
     if (tmpCst.isEmpty()) {
       redun[r] = true;
       // Zero fill the redundant inequality.
-      fillInequality(this, r, /*val=*/0);
-      fillInequality(&tmpCst, r, /*val=*/0);
+      inequalities.fillRow(r, /*value=*/0);
+      tmpCst.inequalities.fillRow(r, /*value=*/0);
     } else {
       // Reverse the change (to avoid recreating tmpCst each time).
       tmpCst.atIneq(r, tmpCst.getNumCols() - 1)++;
-      negateInequality(&tmpCst, r);
+      tmpCst.inequalities.negateRow(r);
     }
   }
 
-  // Scan to get rid of all rows marked redundant, in-place.
-  auto copyRow = [&](unsigned src, unsigned dest) {
-    if (src == dest)
-      return;
-    for (unsigned c = 0, e = getNumCols(); c < e; c++) {
-      atIneq(dest, c) = atIneq(src, c);
-    }
-  };
   unsigned pos = 0;
-  for (unsigned r = 0, e = getNumInequalities(); r < e; r++) {
+  for (unsigned r = 0, e = getNumInequalities(); r < e; ++r) {
     if (!redun[r])
-      copyRow(r, pos++);
+      inequalities.copyRow(r, pos++);
   }
   inequalities.resizeVertically(pos);
 }
@@ -994,19 +933,13 @@ void IntegerPolyhedron::removeRedundantConstraints() {
   Simplex simplex(*this);
   simplex.detectRedundant();
 
-  auto copyInequality = [&](unsigned src, unsigned dest) {
-    if (src == dest)
-      return;
-    for (unsigned c = 0, e = getNumCols(); c < e; c++)
-      atIneq(dest, c) = atIneq(src, c);
-  };
   unsigned pos = 0;
   unsigned numIneqs = getNumInequalities();
   // Scan to get rid of all inequalities marked redundant, in-place. In Simplex,
   // the first constraints added are the inequalities.
   for (unsigned r = 0; r < numIneqs; r++) {
     if (!simplex.isMarkedRedundant(r))
-      copyInequality(r, pos++);
+      inequalities.copyRow(r, pos++);
   }
   inequalities.resizeVertically(pos);
 
@@ -1014,39 +947,83 @@ void IntegerPolyhedron::removeRedundantConstraints() {
   // after the inequalities, a pair of constraints for each equality is added.
   // An equality is redundant if both the inequalities in its pair are
   // redundant.
-  auto copyEquality = [&](unsigned src, unsigned dest) {
-    if (src == dest)
-      return;
-    for (unsigned c = 0, e = getNumCols(); c < e; c++)
-      atEq(dest, c) = atEq(src, c);
-  };
   pos = 0;
   for (unsigned r = 0, e = getNumEqualities(); r < e; r++) {
     if (!(simplex.isMarkedRedundant(numIneqs + 2 * r) &&
           simplex.isMarkedRedundant(numIneqs + 2 * r + 1)))
-      copyEquality(r, pos++);
+      equalities.copyRow(r, pos++);
   }
   equalities.resizeVertically(pos);
 }
 
-/// Eliminate `pos2^th` local identifier, replacing its every instance with
-/// `pos1^th` local identifier. This function is intended to be used to remove
-/// redundancy when local variables at position `pos1` and `pos2` are restricted
-/// to have the same value.
-static void eliminateRedundantLocalId(IntegerPolyhedron &poly, unsigned pos1,
-                                      unsigned pos2) {
+Optional<uint64_t> IntegerPolyhedron::computeVolume() const {
+  assert(getNumSymbolIds() == 0 && "Symbols are not yet supported!");
 
-  assert(pos1 < poly.getNumLocalIds() && "Invalid local id position");
-  assert(pos2 < poly.getNumLocalIds() && "Invalid local id position");
+  Simplex simplex(*this);
+  // If the polytope is rationally empty, there are certainly no integer
+  // points.
+  if (simplex.isEmpty())
+    return 0;
 
-  unsigned localOffset = poly.getNumDimAndSymbolIds();
-  pos1 += localOffset;
-  pos2 += localOffset;
-  for (unsigned i = 0, e = poly.getNumInequalities(); i < e; ++i)
-    poly.atIneq(i, pos1) += poly.atIneq(i, pos2);
-  for (unsigned i = 0, e = poly.getNumEqualities(); i < e; ++i)
-    poly.atEq(i, pos1) += poly.atEq(i, pos2);
-  poly.removeId(pos2);
+  // Just find the maximum and minimum integer value of each non-local id
+  // separately, thus finding the number of integer values each such id can
+  // take. Multiplying these together gives a valid overapproximation of the
+  // number of integer points in the polyhedron. The result this gives is
+  // equivalent to projecting (rationally) the polyhedron onto its non-local ids
+  // and returning the number of integer points in a minimal axis-parallel
+  // hyperrectangular overapproximation of that.
+  //
+  // We also handle the special case where one dimension is unbounded and
+  // another dimension can take no integer values. In this case, the volume is
+  // zero.
+  //
+  // If there is no such empty dimension, if any dimension is unbounded we
+  // just return the result as unbounded.
+  uint64_t count = 1;
+  SmallVector<int64_t, 8> dim(getNumIds() + 1);
+  bool hasUnboundedId = false;
+  for (unsigned i = 0, e = getNumDimAndSymbolIds(); i < e; ++i) {
+    dim[i] = 1;
+    MaybeOptimum<int64_t> min, max;
+    std::tie(min, max) = simplex.computeIntegerBounds(dim);
+    dim[i] = 0;
+
+    assert((!min.isEmpty() && !max.isEmpty()) &&
+           "Polytope should be rationally non-empty!");
+
+    // One of the dimensions is unbounded. Note this fact. We will return
+    // unbounded if none of the other dimensions makes the volume zero.
+    if (min.isUnbounded() || max.isUnbounded()) {
+      hasUnboundedId = true;
+      continue;
+    }
+
+    // In this case there are no valid integer points and the volume is
+    // definitely zero.
+    if (min.getBoundedOptimum() > max.getBoundedOptimum())
+      return 0;
+
+    count *= (*max - *min + 1);
+  }
+
+  if (count == 0)
+    return 0;
+  if (hasUnboundedId)
+    return {};
+  return count;
+}
+
+void IntegerPolyhedron::eliminateRedundantLocalId(unsigned posA,
+                                                  unsigned posB) {
+  assert(posA < getNumLocalIds() && "Invalid local id position");
+  assert(posB < getNumLocalIds() && "Invalid local id position");
+
+  unsigned localOffset = getIdKindOffset(IdKind::Local);
+  posA += localOffset;
+  posB += localOffset;
+  inequalities.addToColumn(posB, posA, 1);
+  equalities.addToColumn(posB, posA, 1);
+  removeId(posB);
 }
 
 /// Adds additional local ids to the sets such that they both have the union
@@ -1093,8 +1070,8 @@ void IntegerPolyhedron::mergeLocalIds(IntegerPolyhedron &other) {
   // Merge function that merges the local variables in both sets by treating
   // them as the same identifier.
   auto merge = [&polyA, &polyB](unsigned i, unsigned j) -> bool {
-    eliminateRedundantLocalId(polyA, i, j);
-    eliminateRedundantLocalId(polyB, i, j);
+    polyA.eliminateRedundantLocalId(i, j);
+    polyB.eliminateRedundantLocalId(i, j);
     return true;
   };
 
@@ -1113,7 +1090,7 @@ void IntegerPolyhedron::removeRedundantLocalVars() {
   // Normalize the equality constraints to reduce coefficients of local
   // variables to 1 wherever possible.
   for (unsigned i = 0, e = getNumEqualities(); i < e; ++i)
-    normalizeConstraintByGCD</*isEq=*/true>(this, i);
+    equalities.normalizeRow(i);
 
   while (true) {
     unsigned i, e, j, f;
@@ -1137,7 +1114,7 @@ void IntegerPolyhedron::removeRedundantLocalVars() {
     for (unsigned k = 0, t = getNumEqualities(); k < t; ++k) {
       if (atEq(k, j) != 0) {
         eliminateFromConstraint(this, k, i, j, j, /*isEq=*/true);
-        normalizeConstraintByGCD</*isEq=*/true>(this, k);
+        equalities.normalizeRow(k);
       }
     }
 
@@ -1223,13 +1200,6 @@ void IntegerPolyhedron::addLocalFloorDiv(ArrayRef<int64_t> dividend,
                  std::negate<int64_t>());
   bound[bound.size() - 1] += divisor - 1;
   addInequality(bound);
-}
-
-void IntegerPolyhedron::setDimSymbolSeparation(unsigned newSymbolCount) {
-  assert(newSymbolCount <= numDims + numSymbols &&
-         "invalid separation position");
-  numDims = numDims + numSymbols - newSymbolCount;
-  numSymbols = newSymbolCount;
 }
 
 /// Finds an equality that equates the specified identifier to a constant.
@@ -1482,11 +1452,21 @@ IntegerPolyhedron::computeConstantLowerOrUpperBound(unsigned pos) {
 
 Optional<int64_t> IntegerPolyhedron::getConstantBound(BoundType type,
                                                       unsigned pos) const {
-  assert(type != BoundType::EQ && "EQ not implemented");
-  IntegerPolyhedron tmpCst(*this);
   if (type == BoundType::LB)
-    return tmpCst.computeConstantLowerOrUpperBound</*isLower=*/true>(pos);
-  return tmpCst.computeConstantLowerOrUpperBound</*isLower=*/false>(pos);
+    return IntegerPolyhedron(*this)
+        .computeConstantLowerOrUpperBound</*isLower=*/true>(pos);
+  if (type == BoundType::UB)
+    return IntegerPolyhedron(*this)
+        .computeConstantLowerOrUpperBound</*isLower=*/false>(pos);
+
+  assert(type == BoundType::EQ && "expected EQ");
+  Optional<int64_t> lb =
+      IntegerPolyhedron(*this)
+          .computeConstantLowerOrUpperBound</*isLower=*/true>(pos);
+  Optional<int64_t> ub =
+      IntegerPolyhedron(*this)
+          .computeConstantLowerOrUpperBound</*isLower=*/false>(pos);
+  return (lb && ub && *lb == *ub) ? Optional<int64_t>(*ub) : None;
 }
 
 // A simple (naive and conservative) check for hyper-rectangularity.
@@ -1585,25 +1565,6 @@ void IntegerPolyhedron::removeTrivialRedundancy() {
   // the savings.
 }
 
-static std::pair<unsigned, unsigned>
-getNewNumDimsSymbols(unsigned pos, const IntegerPolyhedron &cst) {
-  unsigned numDims = cst.getNumDimIds();
-  unsigned numSymbols = cst.getNumSymbolIds();
-  unsigned newNumDims, newNumSymbols;
-  if (pos < numDims) {
-    newNumDims = numDims - 1;
-    newNumSymbols = numSymbols;
-  } else if (pos < numDims + numSymbols) {
-    assert(numSymbols >= 1);
-    newNumDims = numDims;
-    newNumSymbols = numSymbols - 1;
-  } else {
-    newNumDims = numDims;
-    newNumSymbols = numSymbols;
-  }
-  return {newNumDims, newNumSymbols};
-}
-
 #undef DEBUG_TYPE
 #define DEBUG_TYPE "fm"
 
@@ -1674,12 +1635,7 @@ void IntegerPolyhedron::fourierMotzkinEliminate(unsigned pos, bool darkShadow,
   gcdTightenInequalities();
 
   // Check if the identifier appears at all in any of the inequalities.
-  unsigned r, e;
-  for (r = 0, e = getNumInequalities(); r < e; r++) {
-    if (atIneq(r, pos) != 0)
-      break;
-  }
-  if (r == getNumInequalities()) {
+  if (isColZero(pos)) {
     // If it doesn't appear, just remove the column and return.
     // TODO: refactor removeColumns to use it from here.
     removeId(pos);
@@ -1712,16 +1668,19 @@ void IntegerPolyhedron::fourierMotzkinEliminate(unsigned pos, bool darkShadow,
     }
   }
 
-  // Set the number of dimensions, symbols in the resulting system.
-  const auto &dimsSymbols = getNewNumDimsSymbols(pos, *this);
-  unsigned newNumDims = dimsSymbols.first;
-  unsigned newNumSymbols = dimsSymbols.second;
+  // Set the number of dimensions, symbols, locals in the resulting system.
+  unsigned newNumDims =
+      getNumDimIds() - getIdKindOverlap(IdKind::SetDim, pos, pos + 1);
+  unsigned newNumSymbols =
+      getNumSymbolIds() - getIdKindOverlap(IdKind::Symbol, pos, pos + 1);
+  unsigned newNumLocals =
+      getNumLocalIds() - getIdKindOverlap(IdKind::Local, pos, pos + 1);
 
   /// Create the new system which has one identifier less.
-  IntegerPolyhedron newPoly(
-      lbIndices.size() * ubIndices.size() + nbIndices.size(),
-      getNumEqualities(), getNumCols() - 1, newNumDims, newNumSymbols,
-      /*numLocals=*/getNumIds() - 1 - newNumDims - newNumSymbols);
+  IntegerPolyhedron newPoly(lbIndices.size() * ubIndices.size() +
+                                nbIndices.size(),
+                            getNumEqualities(), getNumCols() - 1, newNumDims,
+                            newNumSymbols, newNumLocals);
 
   // This will be used to check if the elimination was integer exact.
   unsigned lcmProducts = 1;
@@ -1897,7 +1856,7 @@ static void getCommonConstraints(const IntegerPolyhedron &a,
 // lower bounds and the max of the upper bounds along each of the dimensions.
 LogicalResult
 IntegerPolyhedron::unionBoundingBox(const IntegerPolyhedron &otherCst) {
-  assert(otherCst.getNumDimIds() == numDims && "dims mismatch");
+  assert(otherCst.getNumDimIds() == getNumDimIds() && "dims mismatch");
   assert(otherCst.getNumLocalIds() == 0 && "local ids not supported here");
   assert(getNumLocalIds() == 0 && "local ids not supported yet here");
 

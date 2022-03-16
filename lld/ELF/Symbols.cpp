@@ -15,9 +15,6 @@
 #include "Writer.h"
 #include "lld/Common/ErrorHandler.h"
 #include "lld/Common/Strings.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/FileSystem.h"
-#include "llvm/Support/Path.h"
 #include <cstring>
 
 using namespace llvm;
@@ -34,10 +31,6 @@ std::string lld::toString(const elf::Symbol &sym) {
   if (*suffix == '@')
     ret += suffix;
   return ret;
-}
-
-std::string lld::toELFString(const Archive::Symbol &b) {
-  return demangle(b.getName(), config->demangle);
 }
 
 Defined *ElfSym::bss;
@@ -132,7 +125,6 @@ static uint64_t getSymVA(const Symbol &sym, int64_t addend) {
   case Symbol::SharedKind:
   case Symbol::UndefinedKind:
     return 0;
-  case Symbol::LazyArchiveKind:
   case Symbol::LazyObjectKind:
     llvm_unreachable("lazy symbol reached writer");
   case Symbol::CommonKind:
@@ -249,22 +241,10 @@ void Symbol::parseSymbolVersion() {
 }
 
 void Symbol::extract() const {
-  if (auto *sym = dyn_cast<LazyArchive>(this)) {
-    cast<ArchiveFile>(sym->file)->extract(sym->sym);
-  } else if (file->lazy) {
+  if (file->lazy) {
     file->lazy = false;
     parseFile(file);
   }
-}
-
-MemoryBufferRef LazyArchive::getMemberBuffer() {
-  Archive::Child c =
-      CHECK(sym.getMember(),
-            "could not get the member for symbol " + toELFString(sym));
-
-  return CHECK(c.getMemoryBufferRef(),
-               "could not get the buffer for the member defining symbol " +
-                   toELFString(sym));
 }
 
 uint8_t Symbol::computeBinding() const {
@@ -290,20 +270,20 @@ bool Symbol::includeInDynsym() const {
 }
 
 // Print out a log message for --trace-symbol.
-void elf::printTraceSymbol(const Symbol *sym) {
+void elf::printTraceSymbol(const Symbol &sym, StringRef name) {
   std::string s;
-  if (sym->isUndefined())
+  if (sym.isUndefined())
     s = ": reference to ";
-  else if (sym->isLazy())
+  else if (sym.isLazy())
     s = ": lazy definition of ";
-  else if (sym->isShared())
+  else if (sym.isShared())
     s = ": shared definition of ";
-  else if (sym->isCommon())
+  else if (sym.isCommon())
     s = ": common definition of ";
   else
     s = ": definition of ";
 
-  message(toString(sym->file) + s + sym->getName());
+  message(toString(sym.file) + s + name);
 }
 
 static void recordWhyExtract(const InputFile *reference,
@@ -405,8 +385,6 @@ static uint8_t getMinVisibility(uint8_t va, uint8_t vb) {
 void Symbol::mergeProperties(const Symbol &other) {
   if (other.exportDynamic)
     exportDynamic = true;
-  if (other.isUsedInRegularObj)
-    isUsedInRegularObj = true;
 
   // DSO symbols do not affect visibility in the output.
   if (!other.isShared())
@@ -430,9 +408,6 @@ void Symbol::resolve(const Symbol &other) {
     break;
   case Symbol::DefinedKind:
     resolveDefined(cast<Defined>(other));
-    break;
-  case Symbol::LazyArchiveKind:
-    resolveLazy(cast<LazyArchive>(other));
     break;
   case Symbol::LazyObjectKind:
     resolveLazy(cast<LazyObject>(other));
@@ -458,7 +433,7 @@ void Symbol::resolveUndefined(const Undefined &other) {
   }
 
   if (traced)
-    printTraceSymbol(&other);
+    printTraceSymbol(other, getName());
 
   if (isLazy()) {
     // An undefined weak will not extract archive members. See comment on Lazy
@@ -552,71 +527,38 @@ void Symbol::resolveUndefined(const Undefined &other) {
   }
 }
 
-// Compare two symbols. Return 1 if the new symbol should win, -1 if
-// the new symbol should lose, or 0 if there is a conflict.
-int Symbol::compare(const Symbol *other) const {
-  assert(other->isDefined() || other->isCommon());
-
-  if (!isDefined() && !isCommon())
-    return 1;
+// Compare two symbols. Return true if the new symbol should win.
+bool Symbol::compare(const Defined &other) const {
+  if (LLVM_UNLIKELY(isCommon())) {
+    if (config->warnCommon)
+      warn("common " + getName() + " is overridden");
+    return !other.isWeak();
+  }
+  if (!isDefined())
+    return true;
 
   // .symver foo,foo@@VER unfortunately creates two defined symbols: foo and
   // foo@@VER. In GNU ld, if foo and foo@@VER are in the same file, foo is
   // ignored. In our implementation, when this is foo, this->getName() may still
-  // contain @@, return 1 in this case as well.
-  if (file == other->file) {
-    if (other->getName().contains("@@"))
-      return 1;
+  // contain @@, return true in this case as well.
+  if (LLVM_UNLIKELY(file == other.file)) {
+    if (other.getName().contains("@@"))
+      return true;
     if (getName().contains("@@"))
-      return -1;
+      return false;
   }
 
-  if (other->isWeak())
-    return -1;
-
-  if (isWeak())
-    return 1;
-
-  if (isCommon() && other->isCommon()) {
-    if (config->warnCommon)
-      warn("multiple common of " + getName());
-    return 0;
-  }
-
-  if (isCommon()) {
-    if (config->warnCommon)
-      warn("common " + getName() + " is overridden");
-    return 1;
-  }
-
-  if (other->isCommon()) {
-    if (config->warnCommon)
-      warn("common " + getName() + " is overridden");
-    return -1;
-  }
-
-  auto *oldSym = cast<Defined>(this);
-  auto *newSym = cast<Defined>(other);
-
-  if (isa_and_nonnull<BitcodeFile>(other->file))
-    return 0;
-
-  if (!oldSym->section && !newSym->section && oldSym->value == newSym->value &&
-      newSym->binding == STB_GLOBAL)
-    return -1;
-
-  return 0;
+  return isWeak() && !other.isWeak();
 }
 
-static void reportDuplicate(Symbol *sym, InputFile *newFile,
-                            InputSectionBase *errSec, uint64_t errOffset) {
+void elf::reportDuplicate(const Symbol &sym, InputFile *newFile,
+                          InputSectionBase *errSec, uint64_t errOffset) {
   if (config->allowMultipleDefinition)
     return;
-
-  Defined *d = cast<Defined>(sym);
+  const Defined *d = cast<Defined>(&sym);
   if (!d->section || !errSec) {
-    error("duplicate symbol: " + toString(*sym) + "\n>>> defined in " +
-          toString(sym->file) + "\n>>> defined in " + toString(newFile));
+    error("duplicate symbol: " + toString(sym) + "\n>>> defined in " +
+          toString(sym.file) + "\n>>> defined in " + toString(newFile));
     return;
   }
 
@@ -628,12 +570,12 @@ static void reportDuplicate(Symbol *sym, InputFile *newFile,
   //   >>> defined at baz.c:563
   //   >>>            baz.o in archive libbaz.a
   auto *sec1 = cast<InputSectionBase>(d->section);
-  std::string src1 = sec1->getSrcMsg(*sym, d->value);
+  std::string src1 = sec1->getSrcMsg(sym, d->value);
   std::string obj1 = sec1->getObjMsg(d->value);
-  std::string src2 = errSec->getSrcMsg(*sym, errOffset);
+  std::string src2 = errSec->getSrcMsg(sym, errOffset);
   std::string obj2 = errSec->getObjMsg(errOffset);
 
-  std::string msg = "duplicate symbol: " + toString(*sym) + "\n>>> defined at ";
+  std::string msg = "duplicate symbol: " + toString(sym) + "\n>>> defined at ";
   if (!src1.empty())
     msg += src1 + "\n>>>            ";
   msg += obj1 + "\n>>> defined at ";
@@ -643,70 +585,59 @@ static void reportDuplicate(Symbol *sym, InputFile *newFile,
   error(msg);
 }
 
-void Symbol::resolveCommon(const CommonSymbol &other) {
-  int cmp = compare(&other);
-  if (cmp < 0)
-    return;
-
-  if (cmp > 0) {
-    if (auto *s = dyn_cast<SharedSymbol>(this)) {
-      // Increase st_size if the shared symbol has a larger st_size. The shared
-      // symbol may be created from common symbols. The fact that some object
-      // files were linked into a shared object first should not change the
-      // regular rule that picks the largest st_size.
-      uint64_t size = s->size;
-      replace(other);
-      if (size > cast<CommonSymbol>(this)->size)
-        cast<CommonSymbol>(this)->size = size;
-    } else {
-      replace(other);
-    }
-    return;
-  }
-
-  CommonSymbol *oldSym = cast<CommonSymbol>(this);
-
-  oldSym->alignment = std::max(oldSym->alignment, other.alignment);
-  if (oldSym->size < other.size) {
-    oldSym->file = other.file;
-    oldSym->size = other.size;
-  }
-}
-
-void Symbol::resolveDefined(const Defined &other) {
-  int cmp = compare(&other);
-  if (cmp > 0)
-    replace(other);
-  else if (cmp == 0)
-    reportDuplicate(this, other.file,
+void Symbol::checkDuplicate(const Defined &other) const {
+  if (isDefined() && !isWeak() && !other.isWeak())
+    reportDuplicate(*this, other.file,
                     dyn_cast_or_null<InputSectionBase>(other.section),
                     other.value);
 }
 
-template <class LazyT>
-static void replaceCommon(Symbol &oldSym, const LazyT &newSym) {
-  backwardReferences.erase(&oldSym);
-  oldSym.replace(newSym);
-  newSym.extract();
+void Symbol::resolveCommon(const CommonSymbol &other) {
+  if (isDefined() && !isWeak()) {
+    if (config->warnCommon)
+      warn("common " + getName() + " is overridden");
+    return;
+  }
+
+  if (CommonSymbol *oldSym = dyn_cast<CommonSymbol>(this)) {
+    if (config->warnCommon)
+      warn("multiple common of " + getName());
+    oldSym->alignment = std::max(oldSym->alignment, other.alignment);
+    if (oldSym->size < other.size) {
+      oldSym->file = other.file;
+      oldSym->size = other.size;
+    }
+    return;
+  }
+
+  if (auto *s = dyn_cast<SharedSymbol>(this)) {
+    // Increase st_size if the shared symbol has a larger st_size. The shared
+    // symbol may be created from common symbols. The fact that some object
+    // files were linked into a shared object first should not change the
+    // regular rule that picks the largest st_size.
+    uint64_t size = s->size;
+    replace(other);
+    if (size > cast<CommonSymbol>(this)->size)
+      cast<CommonSymbol>(this)->size = size;
+  } else {
+    replace(other);
+  }
 }
 
-template <class LazyT> void Symbol::resolveLazy(const LazyT &other) {
+void Symbol::resolveDefined(const Defined &other) {
+  if (compare(other))
+    replace(other);
+}
+
+void Symbol::resolveLazy(const LazyObject &other) {
   // For common objects, we want to look for global or weak definitions that
   // should be extracted as the canonical definition instead.
-  if (isCommon() && elf::config->fortranCommon) {
-    if (auto *laSym = dyn_cast<LazyArchive>(&other)) {
-      ArchiveFile *archive = cast<ArchiveFile>(laSym->file);
-      const Archive::Symbol &archiveSym = laSym->sym;
-      if (archive->shouldExtractForCommon(archiveSym)) {
-        replaceCommon(*this, other);
-        return;
-      }
-    } else if (auto *loSym = dyn_cast<LazyObject>(&other)) {
-      if (loSym->file->shouldExtractForCommon(loSym->getName())) {
-        replaceCommon(*this, other);
-        return;
-      }
-    }
+  if (LLVM_UNLIKELY(isCommon()) && elf::config->fortranCommon &&
+      other.file->shouldExtractForCommon(getName())) {
+    backwardReferences.erase(this);
+    replace(other);
+    other.extract();
+    return;
   }
 
   if (!isUndefined()) {
@@ -746,5 +677,5 @@ void Symbol::resolveShared(const SharedSymbol &other) {
     replace(other);
     binding = bind;
   } else if (traced)
-    printTraceSymbol(&other);
+    printTraceSymbol(other, getName());
 }

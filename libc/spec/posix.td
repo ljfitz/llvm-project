@@ -115,9 +115,19 @@ def POSIX : StandardSpec<"POSIX"> {
     [], // Enumerations
     [
       FunctionSpec<
+          "creat",
+          RetValSpec<IntType>,
+          [ArgSpec<ConstCharPtr>, ArgSpec<ModeTType>]
+      >,
+      FunctionSpec<
           "open",
           RetValSpec<IntType>,
           [ArgSpec<ConstCharPtr>, ArgSpec<IntType>, ArgSpec<VarArgType>]
+      >,
+      FunctionSpec<
+          "openat",
+          RetValSpec<IntType>,
+          [ArgSpec<IntType>, ArgSpec<ConstCharPtr>, ArgSpec<IntType>, ArgSpec<VarArgType>]
       >,
     ]
   >;
@@ -233,6 +243,21 @@ def POSIX : StandardSpec<"POSIX"> {
           [ArgSpec<IntType>, ArgSpec<VoidPtr>, ArgSpec<SizeTType>]
         >,
         FunctionSpec<
+          "rmdir",
+          RetValSpec<IntType>,
+          [ArgSpec<ConstCharPtr>]
+        >,
+        FunctionSpec<
+          "unlink",
+          RetValSpec<IntType>,
+          [ArgSpec<ConstCharPtr>]
+        >,
+        FunctionSpec<
+          "unlinkat",
+          RetValSpec<IntType>,
+          [ArgSpec<IntType>, ArgSpec<ConstCharPtr>, ArgSpec<IntType>]
+        >,
+        FunctionSpec<
           "write",
           RetValSpec<SSizeTType>,
           [ArgSpec<IntType>, ArgSpec<ConstVoidPtr>, ArgSpec<SizeTType>]
@@ -240,6 +265,20 @@ def POSIX : StandardSpec<"POSIX"> {
     ]
   >;
   
+  HeaderSpec StdLib = HeaderSpec<
+    "stdlib.h",
+    [], // Macros
+    [], // Types
+    [], // Enumerations
+    [
+        FunctionSpec<
+          "getenv",
+          RetValSpec<CharPtr>,
+          [ArgSpec<ConstCharPtr>]
+        >,
+    ]
+  >;
+
   HeaderSpec String = HeaderSpec<
     "string.h",
     [
@@ -307,12 +346,33 @@ def POSIX : StandardSpec<"POSIX"> {
     ]
   >;
 
+  HeaderSpec SysStat = HeaderSpec<
+    "sys/stat.h",
+    [], // Macros
+    [ModeTType], // Types
+    [], // Enumerations
+    [
+        FunctionSpec<
+            "mkdir",
+            RetValSpec<IntType>,
+            [ArgSpec<ConstCharPtr>, ArgSpec<ModeTType>]
+        >,
+        FunctionSpec<
+            "mkdirat",
+            RetValSpec<IntType>,
+            [ArgSpec<IntType>, ArgSpec<ConstCharPtr>, ArgSpec<ModeTType>]
+        >,
+    ]
+  >;
+
   let Headers = [
     CType,
     Errno,
     FCntl,
-    SysMMan,
     Signal,
+    StdLib,
+    SysMMan,
+    SysStat,
     UniStd,
     String
   ];

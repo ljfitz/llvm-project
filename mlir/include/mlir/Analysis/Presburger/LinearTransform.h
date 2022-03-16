@@ -18,6 +18,7 @@
 #include "llvm/ADT/SmallVector.h"
 
 namespace mlir {
+namespace presburger {
 
 class LinearTransform {
 public:
@@ -39,16 +40,22 @@ public:
 
   // The given vector is interpreted as a row vector v. Post-multiply v with
   // this transform, say T, and return vT.
-  SmallVector<int64_t, 8> preMultiplyWithRow(ArrayRef<int64_t> rowVec) const;
+  SmallVector<int64_t, 8> preMultiplyWithRow(ArrayRef<int64_t> rowVec) const {
+    return matrix.preMultiplyWithRow(rowVec);
+  }
 
   // The given vector is interpreted as a column vector v. Pre-multiply v with
   // this transform, say T, and return Tv.
   SmallVector<int64_t, 8>
-  postMultiplyWithColumn(ArrayRef<int64_t> colVec) const;
+  postMultiplyWithColumn(ArrayRef<int64_t> colVec) const {
+    return matrix.postMultiplyWithColumn(colVec);
+  }
 
 private:
   Matrix matrix;
 };
 
+} // namespace presburger
 } // namespace mlir
+
 #endif // MLIR_ANALYSIS_PRESBURGER_LINEARTRANSFORM_H
