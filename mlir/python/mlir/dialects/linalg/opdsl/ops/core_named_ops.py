@@ -12,8 +12,8 @@ def conv_2d_relu(
     K=TensorDef(T2, S.F, S.C, S.KH, S.KW),
     B=TensorDef(T3, S.F),
     O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
-    stride=IndexAttrDef(S.SH, S.SW),
-    dilation=IndexAttrDef(S.DH, S.DW)):
+    stride=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
+    dilation=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
   """Performs fused 2-D convolution and relu.
 
   Layout:
@@ -26,13 +26,10 @@ def conv_2d_relu(
   """
   implements(ConvolutionOpInterface)
   domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw)
-  O[D.n, D.f, D.oh, D.ow] += ArithFn.max(
-      TypeFn.cast(U, const(0.0)),
-      ( TypeFn.cast(U, B[D.f])
-      + TypeFn.cast(U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH, D.ow * S.SW + D.kw * S.DW])
-      * TypeFn.cast(U, K[D.f, D.c, D.kh, D.kw])
-      )
-  )
+  O[D.n, D.f, D.oh, D.ow] += (TypeFn.cast(U, B[D.f]) + TypeFn.cast(
+      U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH,
+                     D.ow * S.SW + D.kw * S.DW])
+         * TypeFn.cast(U, K[D.f, D.c, D.kh, D.kw]))
 
 @linalg_structured_op
 def conv_2d_lrelu(
@@ -41,8 +38,8 @@ def conv_2d_lrelu(
     B=TensorDef(T3, S.F),
     alpha=ScalarDef(F32),
     O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
-    stride=IndexAttrDef(S.SH, S.SW),
-    dilation=IndexAttrDef(S.DH, S.DW)):
+    stride=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
+    dilation=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
   """Performs fused 2-D convolution and leaky-relu.
 
   Layout:
@@ -67,12 +64,12 @@ def conv_2d_lrelu_maxpool(
     B=TensorDef(T3, S.F),
     alpha=ScalarDef(F32),
     O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
-    stride=IndexAttrDef(S.SH, S.SW),
-    dilation=IndexAttrDef(S.DH, S.DW),
-    mp_kernel_size=IndexAttrDef(S.MKH, S.MKW),
-    mp_stride=IndexAttrDef(S.MSH, S.MSW),
-    mp_padding=IndexAttrDef(S.MPHL, S.MPHH, S.MPWL, S.MPWH),
-    mp_dilation=IndexAttrDef(S.MDH, S.MDW)):
+    stride=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
+    dilation=IndexAttrDef(S.DH, S.DW, default=[1, 1]),
+    mp_kernel_size=IndexAttrDef(S.MKH, S.MKW, default=[1, 1]),
+    mp_stride=IndexAttrDef(S.MSH, S.MSW, default=[1, 1]),
+    mp_padding=IndexAttrDef(S.MPHL, S.MPHH, S.MPWL, S.MPWH, default=[0, 0, 0, 0]),
+    mp_dilation=IndexAttrDef(S.MDH, S.MDW, default=[1, 1])):
   """Performs fused 2-D convolution, leaky-relu and max-pool.
 
   Layout:
