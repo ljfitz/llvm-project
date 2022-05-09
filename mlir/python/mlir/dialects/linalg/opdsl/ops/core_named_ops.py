@@ -89,6 +89,33 @@ def conv_2d_lrelu_maxpool(
            ]) * TypeFn.cast(U, K[D.f, D.c, D.kh, D.kw]))
 
 @linalg_structured_op
+def conv_2d_elemwise_add(
+    I=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
+    K=TensorDef(T2, S.F, S.C, S.KH, S.KW),
+    B=TensorDef(T3, S.F),
+    O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
+    stride=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
+    dilation=IndexAttrDef(S.DH, S.DW, default=[1, 1]),
+    J=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW)):
+  """Performs fused 2-D convolution and elementwise add.
+
+  Layout:
+    * Input: NCHW.
+    * Kernel: FCHW.
+
+  Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
+  is incorrect. Implementation of correct conv2d_elemwise_add functionality. Current
+  inner loop functionality is a dummy implementation
+  """
+  implements(ConvolutionOpInterface)
+  domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw)
+  O[D.n, D.f, D.oh, D.ow] += BinaryFn.add(TypeFn.cast(U, B[D.f]) + TypeFn.cast(
+      U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH,
+                     D.ow * S.SW + D.kw * S.DW])
+         * TypeFn.cast(U, K[D.f, D.c, D.kh, D.kw]), 
+         TypeFn.cast(T1, J[D.n, D.f, D.oh, D.ow]))
+
+@linalg_structured_op
 def matmul(
     A=TensorDef(T1, S.M, S.K),
     B=TensorDef(T2, S.K, S.N),
