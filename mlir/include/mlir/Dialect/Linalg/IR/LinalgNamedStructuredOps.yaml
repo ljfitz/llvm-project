@@ -420,8 +420,8 @@ structured_op: !LinalgStructuredOpConfig
                           scalar_arg: K
 --- !LinalgOpConfig
 metadata: !LinalgOpMetadata
-  name: conv_2d_tensor_add_relu
-  cpp_class_name: Conv2DTensorAddReluOp
+  name: conv_2d_tensor_add
+  cpp_class_name: Conv2DTensorAddOp
   doc: |-
     Performs fused 2-D convolution and elementwise add.
 
@@ -430,10 +430,8 @@ metadata: !LinalgOpMetadata
       * Kernel: FCHW.
 
     Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
-    is incorrect. Implementation of correct conv_2d_tensor_add_relu functionality. Current
+    is incorrect. Implementation of correct conv_2d_tensor_add functionality. Current
     inner loop functionality is a dummy implementation
-  implements:
-  - LinalgConvolutionOpInterface
 structured_op: !LinalgStructuredOpConfig
   args:
   - !LinalgOperandDefConfig
@@ -459,10 +457,6 @@ structured_op: !LinalgStructuredOpConfig
     kind: input_tensor
     type_var: T3
     shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s10)>
-  - !LinalgOperandDefConfig
-    name: alpha
-    kind: scalar
-    type_var: F32
   - !LinalgOperandDefConfig
     name: O
     kind: output_tensor
@@ -496,8 +490,6 @@ structured_op: !LinalgStructuredOpConfig
     - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
       s9, s10] -> (d1)>
     - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
-      s9, s10] -> ()>
-    - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
       s9, s10] -> (d0, d1, d2, d3)>
   iterator_types:
   - parallel
@@ -520,10 +512,8 @@ structured_op: !LinalgStructuredOpConfig
         - !ScalarExpression
           scalar_fn:
             kind: binary
-            fn_name: mul
+            fn_name: add
             operands:
-            - !ScalarExpression
-              scalar_arg: alpha
             - !ScalarExpression
               scalar_fn:
                 kind: binary
@@ -531,8 +521,16 @@ structured_op: !LinalgStructuredOpConfig
                 operands:
                 - !ScalarExpression
                   scalar_fn:
+                    kind: type
+                    fn_name: cast
+                    type_var: U
+                    operands:
+                    - !ScalarExpression
+                      scalar_arg: B
+                - !ScalarExpression
+                  scalar_fn:
                     kind: binary
-                    fn_name: add
+                    fn_name: mul
                     operands:
                     - !ScalarExpression
                       scalar_fn:
@@ -541,52 +539,37 @@ structured_op: !LinalgStructuredOpConfig
                         type_var: U
                         operands:
                         - !ScalarExpression
-                          scalar_arg: B
+                          scalar_arg: I
                     - !ScalarExpression
                       scalar_fn:
-                        kind: binary
-                        fn_name: mul
+                        kind: type
+                        fn_name: cast
+                        type_var: U
                         operands:
                         - !ScalarExpression
-                          scalar_fn:
-                            kind: type
-                            fn_name: cast
-                            type_var: U
-                            operands:
-                            - !ScalarExpression
-                              scalar_arg: I
-                        - !ScalarExpression
-                          scalar_fn:
-                            kind: type
-                            fn_name: cast
-                            type_var: U
-                            operands:
-                            - !ScalarExpression
-                              scalar_arg: K
+                          scalar_arg: K
+            - !ScalarExpression
+              scalar_fn:
+                kind: type
+                fn_name: cast
+                type_var: T1
+                operands:
                 - !ScalarExpression
-                  scalar_fn:
-                    kind: type
-                    fn_name: cast
-                    type_var: T1
-                    operands:
-                    - !ScalarExpression
-                      scalar_arg: J
+                  scalar_arg: J
 --- !LinalgOpConfig
 metadata: !LinalgOpMetadata
-  name: conv_2d_tensor_add
-  cpp_class_name: Conv2DTensorAddOp
+  name: conv_2d_tensor_add_relu
+  cpp_class_name: Conv2DTensorAddReluOp
   doc: |-
-    Performs fused 2-D convolution and elementwise add.
+    Performs fused 2-D convolution and elementwise add and relu.
 
     Layout:
       * Input: NCHW.
       * Kernel: FCHW.
 
     Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
-    is incorrect. Implementation of correct conv_2d_tensor_add functionality. Current
+    is incorrect. Implementation of correct conv_2d_tensor_add_relu functionality. Current
     inner loop functionality is a dummy implementation
-  implements:
-  - LinalgConvolutionOpInterface
 structured_op: !LinalgStructuredOpConfig
   args:
   - !LinalgOperandDefConfig
@@ -716,7 +699,7 @@ metadata: !LinalgOpMetadata
   name: conv_2d_tensor_add_lrelu
   cpp_class_name: Conv2DTensorAddLreluOp
   doc: |-
-    Performs fused 2-D convolution and elementwise add.
+    Performs fused 2-D convolution, elementwise add and leaky-relu.
 
     Layout:
       * Input: NCHW.
@@ -725,8 +708,6 @@ metadata: !LinalgOpMetadata
     Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
     is incorrect. Implementation of correct conv_2d_tensor_add_lrelu functionality. Current
     inner loop functionality is a dummy implementation
-  implements:
-  - LinalgConvolutionOpInterface
 structured_op: !LinalgStructuredOpConfig
   args:
   - !LinalgOperandDefConfig
