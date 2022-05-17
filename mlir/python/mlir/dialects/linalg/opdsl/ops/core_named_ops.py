@@ -31,6 +31,7 @@ def conv_2d_relu(
                      D.ow * S.SW + D.kw * S.DW])
          * TypeFn.cast(U, K[D.f, D.c, D.kh, D.kw]))
 
+
 @linalg_structured_op
 def conv_2d_lrelu(
     I=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
@@ -56,6 +57,7 @@ def conv_2d_lrelu(
       U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH,
                      D.ow * S.SW + D.kw * S.DW])
          * TypeFn.cast(U, K[D.f, D.c, D.kh, D.kw]))
+
 
 @linalg_structured_op
 def conv_2d_lrelu_maxpool(
@@ -86,32 +88,6 @@ def conv_2d_lrelu_maxpool(
       U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH, D.ow * S.SW + D.kw * S.DW
            ]) * TypeFn.cast(U, K[D.f, D.c, D.kh, D.kw]))
 
-@linalg_structured_op
-def conv_2d_tensor_add_relu(
-    I=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
-    J=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
-    K=TensorDef(T2, S.F, S.C, S.KH, S.KW),
-    B=TensorDef(T3, S.F),
-    O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
-    stride=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
-    dilation=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
-  """Performs fused 2-D convolution and elementwise add.
-
-  Layout:
-    * Input: NCHW.
-    * Kernel: FCHW.
-
-  Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
-  is incorrect. Implementation of correct conv_2d_tensor_add_relu functionality. Current
-  inner loop functionality is a dummy implementation
-  """
-  implements(ConvolutionOpInterface)
-  domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw)
-  O[D.n, D.f, D.oh, D.ow] += BinaryFn.add(TypeFn.cast(U, B[D.f]) + TypeFn.cast(
-      U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH,
-                     D.ow * S.SW + D.kw * S.DW])
-         * TypeFn.cast(U, K[D.f, D.c, D.kh, D.kw]), 
-         TypeFn.cast(T1, J[D.n, D.f, D.oh, D.ow]))
 
 @linalg_structured_op
 def conv_2d_tensor_add(
@@ -132,13 +108,40 @@ def conv_2d_tensor_add(
   is incorrect. Implementation of correct conv_2d_tensor_add functionality. Current
   inner loop functionality is a dummy implementation
   """
-  implements(ConvolutionOpInterface)
   domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw)
-  O[D.n, D.f, D.oh, D.ow] += BinaryFn.add(TypeFn.cast(U, B[D.f]) + TypeFn.cast(
+  O[D.n, D.f, D.oh, D.ow] += ReduceFn.add(TypeFn.cast(U, B[D.f]) + TypeFn.cast(
       U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH,
                      D.ow * S.SW + D.kw * S.DW])
          * TypeFn.cast(U, K[D.f, D.c, D.kh, D.kw]), 
          TypeFn.cast(T1, J[D.n, D.f, D.oh, D.ow]))
+
+
+@linalg_structured_op
+def conv_2d_tensor_add_relu(
+    I=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
+    J=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
+    K=TensorDef(T2, S.F, S.C, S.KH, S.KW),
+    B=TensorDef(T3, S.F),
+    O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
+    stride=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
+    dilation=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
+  """Performs fused 2-D convolution and elementwise add and relu.
+
+  Layout:
+    * Input: NCHW.
+    * Kernel: FCHW.
+
+  Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
+  is incorrect. Implementation of correct conv_2d_tensor_add_relu functionality. Current
+  inner loop functionality is a dummy implementation
+  """
+  domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw)
+  O[D.n, D.f, D.oh, D.ow] += ReduceFn.add(TypeFn.cast(U, B[D.f]) + TypeFn.cast(
+      U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH,
+                     D.ow * S.SW + D.kw * S.DW])
+         * TypeFn.cast(U, K[D.f, D.c, D.kh, D.kw]), 
+         TypeFn.cast(T1, J[D.n, D.f, D.oh, D.ow]))
+
 
 @linalg_structured_op
 def conv_2d_tensor_add_lrelu(
@@ -150,7 +153,7 @@ def conv_2d_tensor_add_lrelu(
     O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
     stride=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
     dilation=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
-  """Performs fused 2-D convolution and elementwise add.
+  """Performs fused 2-D convolution, elementwise add and leaky-relu.
 
   Layout:
     * Input: NCHW.
@@ -160,41 +163,13 @@ def conv_2d_tensor_add_lrelu(
   is incorrect. Implementation of correct conv_2d_tensor_add_lrelu functionality. Current
   inner loop functionality is a dummy implementation
   """
-  implements(ConvolutionOpInterface)
   domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw)
-  O[D.n, D.f, D.oh, D.ow] += alpha * BinaryFn.add(TypeFn.cast(U, B[D.f]) + TypeFn.cast(
+  O[D.n, D.f, D.oh, D.ow] += alpha * ReduceFn.add(TypeFn.cast(U, B[D.f]) + TypeFn.cast(
       U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH,
                      D.ow * S.SW + D.kw * S.DW])
          * TypeFn.cast(U, K[D.f, D.c, D.kh, D.kw]), 
          TypeFn.cast(T1, J[D.n, D.f, D.oh, D.ow]))
 
-@linalg_structured_op
-def conv_2d_tensor_add_relu(
-    I=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
-    J=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
-    K=TensorDef(T2, S.F, S.C, S.KH, S.KW),
-    B=TensorDef(T3, S.F),
-    alpha=ScalarDef(F32),
-    O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
-    stride=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
-    dilation=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
-  """Performs fused 2-D convolution and elementwise add.
-
-  Layout:
-    * Input: NCHW.
-    * Kernel: FCHW.
-
-  Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
-  is incorrect. Implementation of correct conv_2d_tensor_add_relu functionality. Current
-  inner loop functionality is a dummy implementation
-  """
-  implements(ConvolutionOpInterface)
-  domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw)
-  O[D.n, D.f, D.oh, D.ow] += alpha * BinaryFn.add(TypeFn.cast(U, B[D.f]) + TypeFn.cast(
-      U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH,
-                     D.ow * S.SW + D.kw * S.DW])
-         * TypeFn.cast(U, K[D.f, D.c, D.kh, D.kw]), 
-         TypeFn.cast(T1, J[D.n, D.f, D.oh, D.ow]))
 
 @linalg_structured_op
 def matmul(
