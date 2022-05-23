@@ -190,4 +190,16 @@ def Linalg_IndexOp : Linalg_Op<"index", [NoSideEffect]>,
   let hasVerifier = 1;
 }
 
+def Linalg_SoftmaxOp : Linalg_Op<"softmax", [NoSideEffect]> {
+  let arguments = (ins AnyTensor:$input,
+                      Confined<I64Attr, [IntMinValue<0>]>:$dim);
+  let results = (outs AnyTensor:$result);
+  let summary = "linalg softmax operation";
+  let description = [{
+    This implements the softmax operator.
+  }];
+  let assemblyFormat = [{ attr-dict `ins``(` $input `:` type($input)`)` `->` type(results) }];
+  let hasVerifier = 1;
+}
+
 #endif // LINALG_OPS

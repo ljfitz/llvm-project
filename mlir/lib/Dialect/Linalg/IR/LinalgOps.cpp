@@ -663,6 +663,20 @@ void FillOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 //===----------------------------------------------------------------------===//
+// SoftmaxOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult SoftmaxOp::verify() {
+  auto inputTensor = input().getType().dyn_cast<RankedTensorType>();
+  auto outputTensor = result().getType().dyn_cast<RankedTensorType>();
+  if (!inputTensor || !outputTensor)
+    return failure();
+  if (inputTensor.getShape() != outputTensor.getShape())
+    return emitOpError("input and output dimensions must be the same");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // GenericOps
 //===----------------------------------------------------------------------===//
 void GenericOp::build(
