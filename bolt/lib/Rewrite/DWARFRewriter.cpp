@@ -149,10 +149,6 @@ getDWOName(llvm::DWARFUnit &CU,
   return DWOName;
 }
 
-static bool isHighPcFormEightBytes(dwarf::Form DwarfForm) {
-  return DwarfForm == dwarf::DW_FORM_addr || DwarfForm == dwarf::DW_FORM_data8;
-}
-
 void DWARFRewriter::updateDebugInfo() {
   ErrorOr<BinarySection &> DebugInfo = BC.getUniqueSectionByName(".debug_info");
   if (!DebugInfo)
@@ -466,6 +462,7 @@ void DWARFRewriter::updateUnitDebugInfo(
               });
 
           if (E || InputLL.empty()) {
+            consumeError(std::move(E));
             errs() << "BOLT-WARNING: empty location list detected at 0x"
                    << Twine::utohexstr(Offset) << " for DIE at 0x"
                    << Twine::utohexstr(DIE.getOffset()) << " in CU at 0x"

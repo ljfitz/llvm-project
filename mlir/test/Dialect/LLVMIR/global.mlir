@@ -57,9 +57,13 @@ llvm.mlir.global extern_weak @extern_weak() : i64
 llvm.mlir.global linkonce_odr @linkonce_odr() : i64
 // CHECK: llvm.mlir.global weak_odr
 llvm.mlir.global weak_odr @weak_odr() : i64
+// CHECK: llvm.mlir.global external @has_thr_local(42 : i64) {thr_local} : i64
+llvm.mlir.global external @has_thr_local(42 : i64) {thr_local} : i64
+// CHECK: llvm.mlir.global external @has_dso_local(42 : i64) {dso_local} : i64
+llvm.mlir.global external @has_dso_local(42 : i64) {dso_local} : i64
 
 // CHECK-LABEL: references
-func @references() {
+func.func @references() {
   // CHECK: llvm.mlir.addressof @global : !llvm.ptr<i64>
   %0 = llvm.mlir.addressof @global : !llvm.ptr<i64>
 
@@ -81,7 +85,7 @@ llvm.mlir.global internal constant @sectionvar("teststring")  {section = ".mysec
 // -----
 
 // expected-error @+1 {{op requires attribute 'sym_name'}}
-"llvm.mlir.global"() ({}) {type = i64, constant, global_type = i64, value = 42 : i64} : () -> ()
+"llvm.mlir.global"() ({}) {linkage = "private", type = i64, constant, global_type = i64, value = 42 : i64} : () -> ()
 
 // -----
 
@@ -105,7 +109,7 @@ llvm.mlir.global internal constant @constant(37.0) : !llvm.label
 
 // -----
 
-func @foo() {
+func.func @foo() {
   // expected-error @+1 {{must appear at the module level}}
   llvm.mlir.global internal @bar(42) : i32
 
@@ -131,14 +135,14 @@ llvm.mlir.global internal @more_than_one_type(0) : i64, i32
 
 llvm.mlir.global internal @foo(0: i32) : i32
 
-func @bar() {
+func.func @bar() {
   // expected-error @+2{{expected ':'}}
   llvm.mlir.addressof @foo
 }
 
 // -----
 
-func @foo() {
+func.func @foo() {
   // The attribute parser will consume the first colon-type, so we put two of
   // them to trigger the attribute type mismatch error.
   // expected-error @+1 {{invalid kind of attribute specified}}
@@ -147,7 +151,7 @@ func @foo() {
 
 // -----
 
-func @foo() {
+func.func @foo() {
   // expected-error @+1 {{must reference a global defined by 'llvm.mlir.global'}}
   llvm.mlir.addressof @foo : !llvm.ptr<func<void ()>>
 }
@@ -156,7 +160,7 @@ func @foo() {
 
 llvm.mlir.global internal @foo(0: i32) : i32
 
-func @bar() {
+func.func @bar() {
   // expected-error @+1 {{the type must be a pointer to the type of the referenced global}}
   llvm.mlir.addressof @foo : !llvm.ptr<i64>
 }
@@ -172,8 +176,7 @@ llvm.func @bar() {
 
 // -----
 
-// expected-error @+2 {{'llvm.mlir.global' op expects regions to end with 'llvm.return', found 'llvm.mlir.constant'}}
-// expected-note @+1 {{in custom textual format, the absence of terminator implies 'llvm.return'}}
+// expected-error @+2 {{block with no terminator}}
 llvm.mlir.global internal @g() : i64 {
   %c = llvm.mlir.constant(42 : i64) : i64
 }
@@ -197,7 +200,7 @@ llvm.mlir.global internal @g(43 : i64) : i64 {
 // -----
 
 llvm.mlir.global internal @g(32 : i64) {addr_space = 3: i32} : i64
-func @mismatch_addr_space_implicit_global() {
+func.func @mismatch_addr_space_implicit_global() {
   // expected-error @+1 {{op the type must be a pointer to the type of the referenced global}}
   llvm.mlir.addressof @g : !llvm.ptr<i64>
 }
@@ -205,7 +208,7 @@ func @mismatch_addr_space_implicit_global() {
 // -----
 
 llvm.mlir.global internal @g(32 : i64) {addr_space = 3: i32} : i64
-func @mismatch_addr_space() {
+func.func @mismatch_addr_space() {
   // expected-error @+1 {{op the type must be a pointer to the type of the referenced global}}
   llvm.mlir.addressof @g : !llvm.ptr<i64, 4>
 }

@@ -18,7 +18,11 @@
 namespace mlir {
 
 class AffineDialect;
-class StandardOpsDialect;
+class ModuleOp;
+
+namespace func {
+class FuncDialect;
+} // namespace func
 namespace tensor {
 class TensorDialect;
 } // namespace tensor
