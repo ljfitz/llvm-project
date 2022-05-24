@@ -71,7 +71,7 @@ Here's an example of an MLIR module:
 // Compute A*B using an implementation of multiply kernel and print the
 // result using a TensorFlow op. The dimensions of A and B are partially
 // known. The shapes are assumed to match.
-func @mul(%A: tensor<100x?xf32>, %B: tensor<?x50xf32>) -> (tensor<100x50xf32>) {
+func.func @mul(%A: tensor<100x?xf32>, %B: tensor<?x50xf32>) -> (tensor<100x50xf32>) {
   // Compute the inner dimension of %A using the dim operation.
   %n = memref.dim %A, 1 : tensor<100x?xf32>
 
@@ -102,7 +102,7 @@ func @mul(%A: tensor<100x?xf32>, %B: tensor<?x50xf32>) -> (tensor<100x50xf32>) {
 }
 
 // A function that multiplies two memrefs and returns the result.
-func @multiply(%A: memref<100x?xf32>, %B: memref<?x50xf32>)
+func.func @multiply(%A: memref<100x?xf32>, %B: memref<?x50xf32>)
           -> (memref<100x50xf32>)  {
   // Compute the inner dimension of %A.
   %n = memref.dim %A, 1 : memref<100x?xf32>
@@ -203,7 +203,7 @@ bare-id-list ::= bare-id (`,` bare-id)*
 value-id ::= `%` suffix-id
 suffix-id ::= (digit+ | ((letter|id-punct) (letter|id-punct|digit)*))
 
-symbol-ref-id ::= `@` (suffix-id | string-literal)
+symbol-ref-id ::= `@` (suffix-id | string-literal) (`::` symbol-ref-id)?
 value-id-list ::= value-id (`,` value-id)*
 
 // Uses of value, e.g. in an operand list to an operation.
@@ -256,10 +256,10 @@ between, and within, different dialects.
 A few of the dialects supported by MLIR:
 
 *   [Affine dialect](Dialects/Affine.md)
+*   [Func dialect](Dialects/Func.md)
 *   [GPU dialect](Dialects/GPU.md)
 *   [LLVM dialect](Dialects/LLVM.md)
 *   [SPIR-V dialect](Dialects/SPIR-V.md)
-*   [Standard dialect](Dialects/Standard.md)
 *   [Vector dialect](Dialects/Vector.md)
 
 ### Target specific operations
@@ -305,7 +305,7 @@ MLIR introduces a uniform concept called *operations* to enable describing many
 different levels of abstractions and computations. Operations in MLIR are fully
 extensible (there is no fixed list of operations) and have application-specific
 semantics. For example, MLIR supports
-[target-independent operations](Dialects/Standard.md#memory-operations),
+[target-independent operations](Dialects/MemRef.md),
 [affine operations](Dialects/Affine.md), and
 [target-specific machine operations](#target-specific-operations).
 
@@ -366,11 +366,11 @@ compiler [basic block](https://en.wikipedia.org/wiki/Basic_block) where
 instructions inside the block are executed in order and terminator operations
 implement control flow branches between basic blocks.
 
-A region with a single block may not include a
-[terminator operation](#terminator-operations). The enclosing op can opt-out of
-this requirement with the `NoTerminator` trait. The top-level `ModuleOp` is an
-example of such operation which defined this trait and whose block body does not
-have a terminator.
+The last operation in a block must be a
+[terminator operation](#control-flow-and-ssacfg-regions). A region with a single
+block may opt out of this requirement by attaching the `NoTerminator` on the
+enclosing op. The top-level `ModuleOp` is an example of such an operation which
+defines this trait and whose block body does not have a terminator.
 
 Blocks in MLIR take a list of block arguments, notated in a function-like way.
 Block arguments are bound to values specified by the semantics of individual
@@ -389,7 +389,7 @@ Here is a simple example function showing branches, returns, and block
 arguments:
 
 ```mlir
-func @simple(i64, i1) -> i64 {
+func.func @simple(i64, i1) -> i64 {
 ^bb0(%a: i64, %cond: i1): // Code dominated by ^bb0 may refer to %a
   cf.cond_br %cond, ^bb1, ^bb2
 
@@ -529,7 +529,7 @@ region, for example if a function call does not return.
 Example:
 
 ```mlir
-func @accelerator_compute(i64, i1) -> i64 { // An SSACFG region
+func.func @accelerator_compute(i64, i1) -> i64 { // An SSACFG region
 ^bb0(%a: i64, %cond: i1): // Code dominated by ^bb0 may refer to %a
   cf.cond_br %cond, ^bb1, ^bb2
 
@@ -732,8 +732,7 @@ the lighter syntax: `!foo.something<a%%123^^^>>>` because it contains characters
 that are not allowed in the lighter syntax, as well as unbalanced `<>`
 characters.
 
-See [here](Tutorials/DefiningAttributesAndTypes.md) to learn how to define
-dialect types.
+See [here](AttributesAndTypes.md) to learn how to define dialect types.
 
 ### Builtin Types
 
@@ -752,7 +751,7 @@ attribute-value ::= attribute-alias | dialect-attribute | builtin-attribute
 
 Attributes are the mechanism for specifying constant data on operations in
 places where a variable is never allowed - e.g. the comparison predicate of a
-[`cmpi` operation](Dialects/Standard.md#stdcmpi-cmpiop). Each operation has an
+[`cmpi` operation](Dialects/ArithmeticOps.md#arithcmpi-mlirarithcmpiop). Each operation has an
 attribute dictionary, which associates a set of attribute names to attribute
 values. MLIR's builtin dialect provides a rich set of
 [builtin attribute values](#builtin-attribute-values) out of the box (such as
@@ -840,8 +839,7 @@ valid in the lighter syntax: `#foo.something<a%%123^^^>>>` because it contains
 characters that are not allowed in the lighter syntax, as well as unbalanced
 `<>` characters.
 
-See [here](Tutorials/DefiningAttributesAndTypes.md) on how to define dialect
-attribute values.
+See [here](AttributesAndTypes.md) on how to define dialect attribute values.
 
 ### Builtin Attribute Values
 

@@ -18,10 +18,9 @@ static int getInstSeqCost(RISCVMatInt::InstSeq &Res, bool HasRVC) {
 
   int Cost = 0;
   for (auto Instr : Res) {
-    bool Compressed;
+    // Assume instructions that aren't listed aren't compressible.
+    bool Compressed = false;
     switch (Instr.Opc) {
-    default:
-      llvm_unreachable("Unexpected opcode");
     case RISCV::SLLI:
     case RISCV::SRLI:
       Compressed = true;
@@ -30,9 +29,6 @@ static int getInstSeqCost(RISCVMatInt::InstSeq &Res, bool HasRVC) {
     case RISCV::ADDIW:
     case RISCV::LUI:
       Compressed = isInt<6>(Instr.Imm);
-      break;
-    case RISCV::ADD_UW:
-      Compressed = false;
       break;
     }
     // Two RVC instructions take the same space as one RVI instruction, but
@@ -165,6 +161,24 @@ namespace RISCVMatInt {
 InstSeq generateInstSeq(int64_t Val, const FeatureBitset &ActiveFeatures) {
   RISCVMatInt::InstSeq Res;
   generateInstSeqImpl(Val, ActiveFeatures, Res);
+
+  // If there are trailing zeros, try generating a sign extended constant with
+  // no trailing zeros and use a final SLLI to restore them.
+  if ((Val & 1) == 0 && Res.size() > 2) {
+    unsigned TrailingZeros = countTrailingZeros((uint64_t)Val);
+    int64_t ShiftedVal = Val >> TrailingZeros;
+    RISCVMatInt::InstSeq TmpSeq;
+    generateInstSeqImpl(ShiftedVal, ActiveFeatures, TmpSeq);
+    TmpSeq.push_back(RISCVMatInt::Inst(RISCV::SLLI, TrailingZeros));
+
+    // Keep the new sequence if it is an improvement.
+    if (TmpSeq.size() < Res.size()) {
+      Res = TmpSeq;
+      // A 2 instruction sequence is the best we can do.
+      if (Res.size() <= 2)
+        return Res;
+    }
+  }
 
   // If the constant is positive we might be able to generate a shifted constant
   // with no leading zeros and use a final SRLI to restore them.
@@ -302,32 +316,34 @@ InstSeq generateInstSeq(int64_t Val, const FeatureBitset &ActiveFeatures) {
       TmpSeq.push_back(RISCVMatInt::Inst(Opc, 0));
       if (TmpSeq.size() < Res.size())
         Res = TmpSeq;
-    }
-    // Try to use LUI+SH*ADD+ADDI.
-    int64_t Hi52 = ((uint64_t)Val + 0x800ull) & ~0xfffull;
-    int64_t Lo12 = SignExtend64<12>(Val);
-    Div = 0;
-    if (isInt<32>(Hi52 / 3) && (Hi52 % 3) == 0) {
-      Div = 3;
-      Opc = RISCV::SH1ADD;
-    } else if (isInt<32>(Hi52 / 5) && (Hi52 % 5) == 0) {
-      Div = 5;
-      Opc = RISCV::SH2ADD;
-    } else if (isInt<32>(Hi52 / 9) && (Hi52 % 9) == 0) {
-      Div = 9;
-      Opc = RISCV::SH3ADD;
-    }
-    // Build the new instruction sequence.
-    if (Div > 0) {
-      // For Val that has zero Lo12 (implies Val equals to Hi52) should has
-      // already been processed to LUI+SH*ADD by previous optimization.
-      assert(Lo12 != 0 &&
-             "unexpected instruction sequence for immediate materialisation");
-      generateInstSeqImpl(Hi52 / Div, ActiveFeatures, TmpSeq);
-      TmpSeq.push_back(RISCVMatInt::Inst(Opc, 0));
-      TmpSeq.push_back(RISCVMatInt::Inst(RISCV::ADDI, Lo12));
-      if (TmpSeq.size() < Res.size())
-        Res = TmpSeq;
+    } else {
+      // Try to use LUI+SH*ADD+ADDI.
+      int64_t Hi52 = ((uint64_t)Val + 0x800ull) & ~0xfffull;
+      int64_t Lo12 = SignExtend64<12>(Val);
+      Div = 0;
+      if (isInt<32>(Hi52 / 3) && (Hi52 % 3) == 0) {
+        Div = 3;
+        Opc = RISCV::SH1ADD;
+      } else if (isInt<32>(Hi52 / 5) && (Hi52 % 5) == 0) {
+        Div = 5;
+        Opc = RISCV::SH2ADD;
+      } else if (isInt<32>(Hi52 / 9) && (Hi52 % 9) == 0) {
+        Div = 9;
+        Opc = RISCV::SH3ADD;
+      }
+      // Build the new instruction sequence.
+      if (Div > 0) {
+        // For Val that has zero Lo12 (implies Val equals to Hi52) should has
+        // already been processed to LUI+SH*ADD by previous optimization.
+        assert(Lo12 != 0 &&
+               "unexpected instruction sequence for immediate materialisation");
+        assert(TmpSeq.empty() && "Expected empty TmpSeq");
+        generateInstSeqImpl(Hi52 / Div, ActiveFeatures, TmpSeq);
+        TmpSeq.push_back(RISCVMatInt::Inst(Opc, 0));
+        TmpSeq.push_back(RISCVMatInt::Inst(RISCV::ADDI, Lo12));
+        if (TmpSeq.size() < Res.size())
+          Res = TmpSeq;
+      }
     }
   }
 

@@ -21,6 +21,8 @@
 #include "flang/Optimizer/Support/KindMapping.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/Optional.h"
 
 namespace fir {
 class AbstractArrayBox;
@@ -50,8 +52,8 @@ public:
   }
 
   /// Get the current Function
-  mlir::FuncOp getFunction() {
-    return getRegion().getParentOfType<mlir::FuncOp>();
+  mlir::func::FuncOp getFunction() {
+    return getRegion().getParentOfType<mlir::func::FuncOp>();
   }
 
   /// Get a reference to the kind map.
@@ -103,7 +105,7 @@ public:
     return mlir::SymbolRefAttr::get(getContext(), str);
   }
 
-  /// Get the mlir real type that implements fortran REAL(kind).
+  /// Get the mlir float type that implements Fortran REAL(kind).
   mlir::Type getRealType(int kind);
 
   fir::BoxProcType getBoxProcType(mlir::FunctionType funcTy) {
@@ -212,24 +214,27 @@ public:
 
   mlir::StringAttr createLinkOnceLinkage() { return getStringAttr("linkonce"); }
 
+  mlir::StringAttr createLinkOnceODRLinkage() {
+    return getStringAttr("linkonce_odr");
+  }
+
   mlir::StringAttr createWeakLinkage() { return getStringAttr("weak"); }
 
   /// Get a function by name. If the function exists in the current module, it
   /// is returned. Otherwise, a null FuncOp is returned.
-  mlir::FuncOp getNamedFunction(llvm::StringRef name) {
+  mlir::func::FuncOp getNamedFunction(llvm::StringRef name) {
     return getNamedFunction(getModule(), name);
   }
-
-  static mlir::FuncOp getNamedFunction(mlir::ModuleOp module,
-                                       llvm::StringRef name);
+  static mlir::func::FuncOp getNamedFunction(mlir::ModuleOp module,
+                                             llvm::StringRef name);
 
   /// Get a function by symbol name. The result will be null if there is no
   /// function with the given symbol in the module.
-  mlir::FuncOp getNamedFunction(mlir::SymbolRefAttr symbol) {
+  mlir::func::FuncOp getNamedFunction(mlir::SymbolRefAttr symbol) {
     return getNamedFunction(getModule(), symbol);
   }
-  static mlir::FuncOp getNamedFunction(mlir::ModuleOp module,
-                                       mlir::SymbolRefAttr symbol);
+  static mlir::func::FuncOp getNamedFunction(mlir::ModuleOp module,
+                                             mlir::SymbolRefAttr symbol);
 
   fir::GlobalOp getNamedGlobal(llvm::StringRef name) {
     return getNamedGlobal(getModule(), name);
@@ -242,30 +247,36 @@ public:
   mlir::Value createConvert(mlir::Location loc, mlir::Type toTy,
                             mlir::Value val);
 
+  /// Create a fir.store of \p val into \p addr. A lazy conversion
+  /// of \p val to the element type of \p addr is created if needed.
+  void createStoreWithConvert(mlir::Location loc, mlir::Value val,
+                              mlir::Value addr);
+
   /// Create a new FuncOp. If the function may have already been created, use
   /// `addNamedFunction` instead.
-  mlir::FuncOp createFunction(mlir::Location loc, llvm::StringRef name,
-                              mlir::FunctionType ty) {
+  mlir::func::FuncOp createFunction(mlir::Location loc, llvm::StringRef name,
+                                    mlir::FunctionType ty) {
     return createFunction(loc, getModule(), name, ty);
   }
 
-  static mlir::FuncOp createFunction(mlir::Location loc, mlir::ModuleOp module,
-                                     llvm::StringRef name,
-                                     mlir::FunctionType ty);
+  static mlir::func::FuncOp createFunction(mlir::Location loc,
+                                           mlir::ModuleOp module,
+                                           llvm::StringRef name,
+                                           mlir::FunctionType ty);
 
   /// Determine if the named function is already in the module. Return the
   /// instance if found, otherwise add a new named function to the module.
-  mlir::FuncOp addNamedFunction(mlir::Location loc, llvm::StringRef name,
-                                mlir::FunctionType ty) {
+  mlir::func::FuncOp addNamedFunction(mlir::Location loc, llvm::StringRef name,
+                                      mlir::FunctionType ty) {
     if (auto func = getNamedFunction(name))
       return func;
     return createFunction(loc, name, ty);
   }
 
-  static mlir::FuncOp addNamedFunction(mlir::Location loc,
-                                       mlir::ModuleOp module,
-                                       llvm::StringRef name,
-                                       mlir::FunctionType ty) {
+  static mlir::func::FuncOp addNamedFunction(mlir::Location loc,
+                                             mlir::ModuleOp module,
+                                             llvm::StringRef name,
+                                             mlir::FunctionType ty) {
     if (auto func = getNamedFunction(module, name))
       return func;
     return createFunction(loc, module, name, ty);
@@ -371,6 +382,15 @@ public:
   /// Generate code testing \p addr is a null address.
   mlir::Value genIsNull(mlir::Location loc, mlir::Value addr);
 
+  /// Compute the extent of (lb:ub:step) as max((ub-lb+step)/step, 0). See
+  /// Fortran 2018 9.5.3.3.2 section for more details.
+  mlir::Value genExtentFromTriplet(mlir::Location loc, mlir::Value lb,
+                                   mlir::Value ub, mlir::Value step,
+                                   mlir::Type type);
+
+  /// Dump the current function. (debug)
+  LLVM_DUMP_METHOD void dumpFunc();
+
 private:
   const KindMapping &kindMap;
 };
@@ -420,6 +440,18 @@ llvm::SmallVector<mlir::Value> getExtents(fir::FirOpBuilder &builder,
 fir::ExtendedValue readBoxValue(fir::FirOpBuilder &builder, mlir::Location loc,
                                 const fir::BoxValue &box);
 
+/// Get non default (not all ones) lower bounds of \p exv. Returns empty
+/// vector if the lower bounds are all ones.
+llvm::SmallVector<mlir::Value>
+getNonDefaultLowerBounds(fir::FirOpBuilder &builder, mlir::Location loc,
+                         const fir::ExtendedValue &exv);
+
+/// Return length parameters associated to \p exv that are not deferred (that
+/// are available without having to read any fir.box values).
+/// Empty if \p exv has no length parameters or if they are all deferred.
+llvm::SmallVector<mlir::Value>
+getNonDeferredLengthParams(const fir::ExtendedValue &exv);
+
 //===----------------------------------------------------------------------===//
 // String literal helper helpers
 //===----------------------------------------------------------------------===//
@@ -439,25 +471,14 @@ llvm::SmallVector<mlir::Value> createExtents(fir::FirOpBuilder &builder,
                                              mlir::Location loc,
                                              fir::SequenceType seqTy);
 
-//===----------------------------------------------------------------------===//
+//===--------------------------------------------------------------------===//
 // Location helpers
-//===----------------------------------------------------------------------===//
+//===--------------------------------------------------------------------===//
 
 /// Generate a string literal containing the file name and return its address
 mlir::Value locationToFilename(fir::FirOpBuilder &, mlir::Location);
-
 /// Generate a constant of the given type with the location line number
 mlir::Value locationToLineNo(fir::FirOpBuilder &, mlir::Location, mlir::Type);
-
-/// Builds and returns the type of a ragged array header used to cache mask
-/// evaluations. RaggedArrayHeader is defined in
-/// flang/include/flang/Runtime/ragged.h.
-mlir::TupleType getRaggedArrayHeaderType(fir::FirOpBuilder &builder);
-
-/// Create the zero value of a given the numerical or logical \p type (`false`
-/// for logical types).
-mlir::Value createZeroValue(fir::FirOpBuilder &builder, mlir::Location loc,
-                            mlir::Type type);
 
 //===--------------------------------------------------------------------===//
 // ExtendedValue helpers
@@ -487,6 +508,45 @@ fir::ExtendedValue arrayElementToExtendedValue(fir::FirOpBuilder &builder,
 fir::ExtendedValue arraySectionElementToExtendedValue(
     fir::FirOpBuilder &builder, mlir::Location loc,
     const fir::ExtendedValue &array, mlir::Value element, mlir::Value slice);
+
+/// Assign \p rhs to \p lhs. Both \p rhs and \p lhs must be scalars. The
+/// assignment follows Fortran intrinsic assignment semantic (10.2.1.3).
+void genScalarAssignment(fir::FirOpBuilder &builder, mlir::Location loc,
+                         const fir::ExtendedValue &lhs,
+                         const fir::ExtendedValue &rhs);
+/// Assign \p rhs to \p lhs. Both \p rhs and \p lhs must be scalar derived
+/// types. The assignment follows Fortran intrinsic assignment semantic for
+/// derived types (10.2.1.3 point 13).
+void genRecordAssignment(fir::FirOpBuilder &builder, mlir::Location loc,
+                         const fir::ExtendedValue &lhs,
+                         const fir::ExtendedValue &rhs);
+
+/// Builds and returns the type of a ragged array header used to cache mask
+/// evaluations. RaggedArrayHeader is defined in
+/// flang/include/flang/Runtime/ragged.h.
+mlir::TupleType getRaggedArrayHeaderType(fir::FirOpBuilder &builder);
+
+/// Generate the, possibly dynamic, LEN of a CHARACTER. \p arrLoad determines
+/// the base array. After applying \p path, the result must be a reference to a
+/// `!fir.char` type object. \p substring must have 0, 1, or 2 members. The
+/// first member is the starting offset. The second is the ending offset.
+mlir::Value genLenOfCharacter(fir::FirOpBuilder &builder, mlir::Location loc,
+                              fir::ArrayLoadOp arrLoad,
+                              llvm::ArrayRef<mlir::Value> path,
+                              llvm::ArrayRef<mlir::Value> substring);
+mlir::Value genLenOfCharacter(fir::FirOpBuilder &builder, mlir::Location loc,
+                              fir::SequenceType seqTy, mlir::Value memref,
+                              llvm::ArrayRef<mlir::Value> typeParams,
+                              llvm::ArrayRef<mlir::Value> path,
+                              llvm::ArrayRef<mlir::Value> substring);
+
+/// Create the zero value of a given the numerical or logical \p type (`false`
+/// for logical types).
+mlir::Value createZeroValue(fir::FirOpBuilder &builder, mlir::Location loc,
+                            mlir::Type type);
+
+/// Unwrap integer constant from an mlir::Value.
+llvm::Optional<std::int64_t> getIntIfConstant(mlir::Value value);
 
 } // namespace fir::factory
 

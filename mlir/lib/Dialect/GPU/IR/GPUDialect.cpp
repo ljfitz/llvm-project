@@ -261,7 +261,7 @@ LogicalResult GPUDialect::verifyOperationAttribute(Operation *op,
              << actualNumArguments << " kernel operands but expected "
              << expectedNumArguments;
 
-    auto functionType = kernelGPUFunction.getType();
+    auto functionType = kernelGPUFunction.getFunctionType();
     for (unsigned i = 0; i < expectedNumArguments; ++i) {
       if (launchOp.getKernelOperand(i).getType() != functionType.getInput(i)) {
         return launchOp.emitOpError("type of function argument ")
@@ -275,7 +275,45 @@ LogicalResult GPUDialect::verifyOperationAttribute(Operation *op,
   return walkResult.wasInterrupted() ? failure() : success();
 }
 
-LogicalResult gpu::AllReduceOp::verify() {
+/// Parses an optional list of async operands with an optional leading keyword.
+/// (`async`)? (`[` ssa-id-list `]`)?
+///
+/// This method is used by the tablegen assembly format for async ops as well.
+static ParseResult parseAsyncDependencies(
+    OpAsmParser &parser, Type &asyncTokenType,
+    SmallVectorImpl<OpAsmParser::UnresolvedOperand> &asyncDependencies) {
+  auto loc = parser.getCurrentLocation();
+  if (succeeded(parser.parseOptionalKeyword("async"))) {
+    if (parser.getNumResults() == 0)
+      return parser.emitError(loc, "needs to be named when marked 'async'");
+    asyncTokenType = parser.getBuilder().getType<AsyncTokenType>();
+  }
+  return parser.parseOperandList(asyncDependencies,
+                                 OpAsmParser::Delimiter::OptionalSquare);
+}
+
+/// Prints optional async dependencies with its leading keyword.
+///   (`async`)? (`[` ssa-id-list `]`)?
+// Used by the tablegen assembly format for several async ops.
+static void printAsyncDependencies(OpAsmPrinter &printer, Operation *op,
+                                   Type asyncTokenType,
+                                   OperandRange asyncDependencies) {
+  if (asyncTokenType)
+    printer << "async";
+  if (asyncDependencies.empty())
+    return;
+  if (asyncTokenType)
+    printer << ' ';
+  printer << '[';
+  llvm::interleaveComma(asyncDependencies, printer);
+  printer << ']';
+}
+
+//===----------------------------------------------------------------------===//
+// AllReduceOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult gpu::AllReduceOp::verifyRegions() {
   if (body().empty() != op().hasValue())
     return emitError("expected either an op attribute or a non-empty body");
   if (!body().empty()) {
@@ -358,7 +396,12 @@ void gpu::addAsyncDependency(Operation *op, Value token) {
 void LaunchOp::build(OpBuilder &builder, OperationState &result,
                      Value gridSizeX, Value gridSizeY, Value gridSizeZ,
                      Value blockSizeX, Value blockSizeY, Value blockSizeZ,
-                     Value dynamicSharedMemorySize) {
+                     Value dynamicSharedMemorySize, Type asyncTokenType,
+                     ValueRange asyncDependencies) {
+  result.addOperands(asyncDependencies);
+  if (asyncTokenType)
+    result.types.push_back(builder.getType<AsyncTokenType>());
+
   // Add grid and block sizes as op operands, followed by the data operands.
   result.addOperands(
       {gridSizeX, gridSizeY, gridSizeZ, blockSizeX, blockSizeY, blockSizeZ});
@@ -373,6 +416,11 @@ void LaunchOp::build(OpBuilder &builder, OperationState &result,
   for (unsigned i = 0; i < kNumConfigRegionAttributes; ++i)
     body->addArgument(builder.getIndexType(), result.location);
   kernelRegion->push_back(body);
+  SmallVector<int32_t, 8> segmentSizes(8, 1);
+  segmentSizes.front() = asyncDependencies.size();
+  segmentSizes.back() = dynamicSharedMemorySize ? 1 : 0;
+  result.addAttribute(getOperandSegmentSizeAttr(),
+                      builder.getI32VectorAttr(segmentSizes));
 }
 
 KernelDim3 LaunchOp::getBlockIds() {
@@ -400,21 +448,23 @@ KernelDim3 LaunchOp::getBlockSize() {
 }
 
 KernelDim3 LaunchOp::getGridSizeOperandValues() {
-  return KernelDim3{getOperand(0), getOperand(1), getOperand(2)};
+  auto operands = getOperands().drop_front(asyncDependencies().size());
+  return KernelDim3{operands[0], operands[1], operands[2]};
 }
 
 KernelDim3 LaunchOp::getBlockSizeOperandValues() {
-  return KernelDim3{getOperand(3), getOperand(4), getOperand(5)};
+  auto operands = getOperands().drop_front(asyncDependencies().size());
+  return KernelDim3{operands[3], operands[4], operands[5]};
 }
 
-LogicalResult LaunchOp::verify() {
+LogicalResult LaunchOp::verifyRegions() {
   // Kernel launch takes kNumConfigOperands leading operands for grid/block
   // sizes and transforms them into kNumConfigRegionAttributes region arguments
   // for block/thread identifiers and grid/block sizes.
   if (!body().empty()) {
-    if (body().getNumArguments() != LaunchOp::kNumConfigOperands +
-                                        getNumOperands() -
-                                        (dynamicSharedMemorySize() ? 1 : 0))
+    if (body().getNumArguments() !=
+        LaunchOp::kNumConfigOperands + getNumOperands() -
+            (dynamicSharedMemorySize() ? 1 : 0) - asyncDependencies().size())
       return emitOpError("unexpected number of region arguments");
   }
 
@@ -435,6 +485,9 @@ LogicalResult LaunchOp::verify() {
     }
   }
 
+  if (getNumResults() == 0 && asyncToken())
+    return emitOpError("needs to be named when async keyword is specified");
+
   return success();
 }
 
@@ -451,6 +504,11 @@ static void printSizeAssignment(OpAsmPrinter &p, KernelDim3 size,
 }
 
 void LaunchOp::print(OpAsmPrinter &p) {
+  if (asyncToken()) {
+    p << " async";
+    if (!asyncDependencies().empty())
+      p << " [" << asyncDependencies() << ']';
+  }
   // Print the launch configuration.
   p << ' ' << getBlocksKeyword();
   printSizeAssignment(p, getGridSize(), getGridSizeOperandValues(),
@@ -464,7 +522,8 @@ void LaunchOp::print(OpAsmPrinter &p) {
 
   p << ' ';
   p.printRegion(body(), /*printEntryBlockArgs=*/false);
-  p.printOptionalAttrDict((*this)->getAttrs());
+  p.printOptionalAttrDict((*this)->getAttrs(), /*elidedAttrs=*/{
+                              LaunchOp::getOperandSegmentSizeAttr()});
 }
 
 // Parse the size assignment blocks for blocks and threads.  These have the form
@@ -475,11 +534,11 @@ void LaunchOp::print(OpAsmPrinter &p) {
 // SSA value uses.
 static ParseResult
 parseSizeAssignment(OpAsmParser &parser,
-                    MutableArrayRef<OpAsmParser::OperandType> sizes,
-                    MutableArrayRef<OpAsmParser::OperandType> regionSizes,
-                    MutableArrayRef<OpAsmParser::OperandType> indices) {
+                    MutableArrayRef<OpAsmParser::UnresolvedOperand> sizes,
+                    MutableArrayRef<OpAsmParser::UnresolvedOperand> regionSizes,
+                    MutableArrayRef<OpAsmParser::UnresolvedOperand> indices) {
   assert(indices.size() == 3 && "space for three indices expected");
-  SmallVector<OpAsmParser::OperandType, 3> args;
+  SmallVector<OpAsmParser::UnresolvedOperand, 3> args;
   if (parser.parseRegionArgumentList(args, /*requiredOperandCount=*/3,
                                      OpAsmParser::Delimiter::Paren) ||
       parser.parseKeyword("in") || parser.parseLParen())
@@ -498,25 +557,35 @@ parseSizeAssignment(OpAsmParser &parser,
 }
 
 /// Parses a Launch operation.
-/// operation ::= `gpu.launch` `blocks` `(` ssa-id-list `)` `in`
-/// ssa-reassignment
-///                           `threads` `(` ssa-id-list `)` `in`
-///                           ssa-reassignment
-///                            region attr-dict?
+/// operation ::= `gpu.launch` (`async` `[` ssa-id-list `]`)?
+//        `blocks` `(` ssa-id-list `)` `in` ssa-reassignment
+///       `threads` `(` ssa-id-list `)` `in` ssa-reassignment
+///       region attr-dict?
 /// ssa-reassignment ::= `(` ssa-id `=` ssa-use (`,` ssa-id `=` ssa-use)* `)`
 ParseResult LaunchOp::parse(OpAsmParser &parser, OperationState &result) {
   // Sizes of the grid and block.
-  SmallVector<OpAsmParser::OperandType, LaunchOp::kNumConfigOperands> sizes(
-      LaunchOp::kNumConfigOperands);
-  MutableArrayRef<OpAsmParser::OperandType> sizesRef(sizes);
+  SmallVector<OpAsmParser::UnresolvedOperand, LaunchOp::kNumConfigOperands>
+      sizes(LaunchOp::kNumConfigOperands);
+  MutableArrayRef<OpAsmParser::UnresolvedOperand> sizesRef(sizes);
 
   // Actual (data) operands passed to the kernel.
-  SmallVector<OpAsmParser::OperandType, 4> dataOperands;
+  SmallVector<OpAsmParser::UnresolvedOperand, 4> dataOperands;
 
   // Region arguments to be created.
-  SmallVector<OpAsmParser::OperandType, 16> regionArgs(
+  SmallVector<OpAsmParser::UnresolvedOperand, 16> regionArgs(
       LaunchOp::kNumConfigRegionAttributes);
-  MutableArrayRef<OpAsmParser::OperandType> regionArgsRef(regionArgs);
+  MutableArrayRef<OpAsmParser::UnresolvedOperand> regionArgsRef(regionArgs);
+
+  // Parse optional async dependencies.
+  SmallVector<OpAsmParser::UnresolvedOperand, 4> asyncDependencies;
+  Type asyncTokenType;
+  if (failed(
+          parseAsyncDependencies(parser, asyncTokenType, asyncDependencies)) ||
+      parser.resolveOperands(asyncDependencies, asyncTokenType,
+                             result.operands))
+    return failure();
+  if (parser.getNumResults() > 0)
+    result.types.push_back(asyncTokenType);
 
   // Parse the size assignment segments: the first segment assigns grid sizes
   // and defines values for block identifiers; the second segment assigns block
@@ -535,14 +604,17 @@ ParseResult LaunchOp::parse(OpAsmParser &parser, OperationState &result) {
                              result.operands))
     return failure();
 
-  OpAsmParser::OperandType dynamicSharedMemorySize;
+  OpAsmParser::UnresolvedOperand dynamicSharedMemorySize;
+  bool hasDynamicSharedMemorySize = false;
   if (!parser.parseOptionalKeyword(
-          LaunchOp::getDynamicSharedMemorySizeKeyword()))
+          LaunchOp::getDynamicSharedMemorySizeKeyword())) {
+    hasDynamicSharedMemorySize = true;
     if (parser.parseOperand(dynamicSharedMemorySize) ||
         parser.resolveOperand(dynamicSharedMemorySize,
                               parser.getBuilder().getI32Type(),
                               result.operands))
       return failure();
+  }
 
   // Introduce the body region and parse it. The region has
   // kNumConfigRegionAttributes arguments that correspond to
@@ -551,8 +623,16 @@ ParseResult LaunchOp::parse(OpAsmParser &parser, OperationState &result) {
   SmallVector<Type, LaunchOp::kNumConfigRegionAttributes> dataTypes(
       LaunchOp::kNumConfigRegionAttributes, index);
   Region *body = result.addRegion();
-  return failure(parser.parseRegion(*body, regionArgs, dataTypes) ||
-                 parser.parseOptionalAttrDict(result.attributes));
+  if (parser.parseRegion(*body, regionArgs, dataTypes) ||
+      parser.parseOptionalAttrDict(result.attributes))
+    return failure();
+
+  SmallVector<int32_t, 8> segmentSizes(8, 1);
+  segmentSizes.front() = asyncDependencies.size();
+  segmentSizes.back() = hasDynamicSharedMemorySize ? 1 : 0;
+  result.addAttribute(LaunchOp::getOperandSegmentSizeAttr(),
+                      parser.getBuilder().getI32VectorAttr(segmentSizes));
+  return success();
 }
 
 /// Simplify the gpu.launch when the range of a thread or block ID is
@@ -602,7 +682,12 @@ void LaunchOp::getCanonicalizationPatterns(RewritePatternSet &rewrites,
 void LaunchFuncOp::build(OpBuilder &builder, OperationState &result,
                          GPUFuncOp kernelFunc, KernelDim3 gridSize,
                          KernelDim3 blockSize, Value dynamicSharedMemorySize,
-                         ValueRange kernelOperands) {
+                         ValueRange kernelOperands, Type asyncTokenType,
+                         ValueRange asyncDependencies) {
+  result.addOperands(asyncDependencies);
+  if (asyncTokenType)
+    result.types.push_back(builder.getType<AsyncTokenType>());
+
   // Add grid and block sizes as op operands, followed by the data operands.
   result.addOperands({gridSize.x, gridSize.y, gridSize.z, blockSize.x,
                       blockSize.y, blockSize.z});
@@ -615,7 +700,7 @@ void LaunchFuncOp::build(OpBuilder &builder, OperationState &result,
                          {SymbolRefAttr::get(kernelFunc.getNameAttr())});
   result.addAttribute(getKernelAttrName(), kernelSymbol);
   SmallVector<int32_t, 9> segmentSizes(9, 1);
-  segmentSizes.front() = 0; // Initially no async dependencies.
+  segmentSizes.front() = asyncDependencies.size();
   segmentSizes[segmentSizes.size() - 2] = dynamicSharedMemorySize ? 1 : 0;
   segmentSizes.back() = static_cast<int32_t>(kernelOperands.size());
   result.addAttribute(getOperandSegmentSizeAttr(),
@@ -667,10 +752,10 @@ LogicalResult LaunchFuncOp::verify() {
   return success();
 }
 
-static ParseResult
-parseLaunchFuncOperands(OpAsmParser &parser,
-                        SmallVectorImpl<OpAsmParser::OperandType> &argNames,
-                        SmallVectorImpl<Type> &argTypes) {
+static ParseResult parseLaunchFuncOperands(
+    OpAsmParser &parser,
+    SmallVectorImpl<OpAsmParser::UnresolvedOperand> &argNames,
+    SmallVectorImpl<Type> &argTypes) {
   if (parser.parseOptionalKeyword("args"))
     return success();
   SmallVector<NamedAttrList> argAttrs;
@@ -723,8 +808,8 @@ BlockArgument GPUFuncOp::addWorkgroupAttribution(Type type, Location loc) {
   auto attr = (*this)->getAttrOfType<IntegerAttr>(attrName);
   (*this)->setAttr(attrName,
                    IntegerAttr::get(attr.getType(), attr.getValue() + 1));
-  return getBody().insertArgument(getType().getNumInputs() + attr.getInt(),
-                                  type, loc);
+  return getBody().insertArgument(
+      getFunctionType().getNumInputs() + attr.getInt(), type, loc);
 }
 
 /// Adds a new block argument that corresponds to buffers located in
@@ -769,7 +854,7 @@ void GPUFuncOp::build(OpBuilder &builder, OperationState &result,
 /// keyword provided as argument.
 static ParseResult
 parseAttributions(OpAsmParser &parser, StringRef keyword,
-                  SmallVectorImpl<OpAsmParser::OperandType> &args,
+                  SmallVectorImpl<OpAsmParser::UnresolvedOperand> &args,
                   SmallVectorImpl<Type> &argTypes) {
   // If we could not parse the keyword, just assume empty list and succeed.
   if (failed(parser.parseOptionalKeyword(keyword)))
@@ -783,7 +868,7 @@ parseAttributions(OpAsmParser &parser, StringRef keyword,
     return success();
 
   do {
-    OpAsmParser::OperandType arg;
+    OpAsmParser::UnresolvedOperand arg;
     Type type;
 
     if (parser.parseRegionArgument(arg) || parser.parseColonType(type))
@@ -802,7 +887,7 @@ parseAttributions(OpAsmParser &parser, StringRef keyword,
 ///                 (`->` function-result-list)? memory-attribution `kernel`?
 ///                 function-attributes? region
 ParseResult GPUFuncOp::parse(OpAsmParser &parser, OperationState &result) {
-  SmallVector<OpAsmParser::OperandType> entryArgs;
+  SmallVector<OpAsmParser::UnresolvedOperand> entryArgs;
   SmallVector<NamedAttrList> argAttrs;
   SmallVector<NamedAttrList> resultAttrs;
   SmallVector<Type> argTypes;
@@ -880,7 +965,7 @@ void GPUFuncOp::print(OpAsmPrinter &p) {
   p << ' ';
   p.printSymbolName(getName());
 
-  FunctionType type = getType();
+  FunctionType type = getFunctionType();
   function_interface_impl::printFunctionSignature(p, *this, type.getInputs(),
                                                   /*isVariadic=*/false,
                                                   type.getResults());
@@ -899,12 +984,12 @@ void GPUFuncOp::print(OpAsmPrinter &p) {
 }
 
 LogicalResult GPUFuncOp::verifyType() {
-  Type type = getTypeAttr().getValue();
+  Type type = getFunctionTypeAttr().getValue();
   if (!type.isa<FunctionType>())
     return emitOpError("requires '" + getTypeAttrName() +
                        "' attribute of function type");
 
-  if (isKernel() && getType().getNumResults() != 0)
+  if (isKernel() && getFunctionType().getNumResults() != 0)
     return emitOpError() << "expected void return type for kernel function";
 
   return success();
@@ -936,7 +1021,7 @@ LogicalResult GPUFuncOp::verifyBody() {
                          << numFuncArguments + numWorkgroupAttributions
                          << " arguments to body region";
 
-  ArrayRef<Type> funcArgTypes = getType().getInputs();
+  ArrayRef<Type> funcArgTypes = getFunctionType().getInputs();
   for (unsigned i = 0; i < numFuncArguments; ++i) {
     Type blockArgType = front().getArgument(i).getType();
     if (funcArgTypes[i] != blockArgType)
@@ -961,7 +1046,7 @@ LogicalResult GPUFuncOp::verifyBody() {
 LogicalResult gpu::ReturnOp::verify() {
   GPUFuncOp function = (*this)->getParentOfType<GPUFuncOp>();
 
-  FunctionType funType = function.getType();
+  FunctionType funType = function.getFunctionType();
 
   if (funType.getNumResults() != operands().size())
     return emitOpError()
@@ -970,7 +1055,7 @@ LogicalResult gpu::ReturnOp::verify() {
         .append("return type declared here");
 
   for (const auto &pair : llvm::enumerate(
-           llvm::zip(function.getType().getResults(), operands()))) {
+           llvm::zip(function.getFunctionType().getResults(), operands()))) {
     Type type;
     Value operand;
     std::tie(type, operand) = pair.value();
@@ -1039,34 +1124,20 @@ LogicalResult MemcpyOp::verify() {
   return success();
 }
 
-static ParseResult parseAsyncDependencies(
-    OpAsmParser &parser, Type &asyncTokenType,
-    SmallVectorImpl<OpAsmParser::OperandType> &asyncDependencies) {
-  auto loc = parser.getCurrentLocation();
-  if (succeeded(parser.parseOptionalKeyword("async"))) {
-    if (parser.getNumResults() == 0)
-      return parser.emitError(loc, "needs to be named when marked 'async'");
-    asyncTokenType = parser.getBuilder().getType<AsyncTokenType>();
-  }
-  return parser.parseOperandList(asyncDependencies,
-                                 OpAsmParser::Delimiter::OptionalSquare);
-}
-
-static void printAsyncDependencies(OpAsmPrinter &printer, Operation *op,
-                                   Type asyncTokenType,
-                                   OperandRange asyncDependencies) {
-  if (asyncTokenType)
-    printer << "async ";
-  if (asyncDependencies.empty())
-    return;
-  printer << "[";
-  llvm::interleaveComma(asyncDependencies, printer);
-  printer << "]";
-}
-
 //===----------------------------------------------------------------------===//
 // GPU_SubgroupMmaLoadMatrixOp
 //===----------------------------------------------------------------------===//
+
+/// Return true if the last dimension of the MemRefType has unit stride. Also
+/// return true for memrefs with no strides.
+static bool isLastMemrefDimUnitStride(MemRefType type) {
+  int64_t offset;
+  SmallVector<int64_t> strides;
+  if (failed(getStridesAndOffset(type, strides, offset))) {
+    return false;
+  }
+  return strides.back() == 1;
+}
 
 LogicalResult SubgroupMmaLoadMatrixOp::verify() {
   auto srcType = srcMemref().getType();
@@ -1076,8 +1147,9 @@ LogicalResult SubgroupMmaLoadMatrixOp::verify() {
   auto srcMemrefType = srcType.cast<MemRefType>();
   auto srcMemSpace = srcMemrefType.getMemorySpaceAsInt();
 
-  if (!srcMemrefType.getLayout().isIdentity())
-    return emitError("expected identity layout map for source memref");
+  if (!isLastMemrefDimUnitStride(srcMemrefType))
+    return emitError(
+        "expected source memref most minor dim must have unit stride");
 
   if (srcMemSpace != kGenericMemorySpace && srcMemSpace != kSharedMemorySpace &&
       srcMemSpace != kGlobalMemorySpace)
@@ -1102,8 +1174,10 @@ LogicalResult SubgroupMmaStoreMatrixOp::verify() {
   auto srcMatrixType = srcType.cast<gpu::MMAMatrixType>();
   auto dstMemrefType = dstType.cast<MemRefType>();
   auto dstMemSpace = dstMemrefType.getMemorySpaceAsInt();
-  if (!dstMemrefType.getLayout().isIdentity())
-    return emitError("expected identity layout map for destination memref");
+
+  if (!isLastMemrefDimUnitStride(dstMemrefType))
+    return emitError(
+        "expected destination memref most minor dim must have unit stride");
 
   if (dstMemSpace != kGenericMemorySpace && dstMemSpace != kSharedMemorySpace &&
       dstMemSpace != kGlobalMemorySpace)
@@ -1171,23 +1245,96 @@ LogicalResult MemsetOp::fold(ArrayRef<Attribute> operands,
 }
 
 //===----------------------------------------------------------------------===//
+// GPU_WaitOp
+//===----------------------------------------------------------------------===//
+
+namespace {
+
+/// Remove gpu.wait op use of gpu.wait op def without async dependencies.
+/// %t = gpu.wait async []       // No async dependencies.
+/// ...  gpu.wait ... [%t, ...]  // %t can be removed.
+struct EraseRedundantGpuWaitOpPairs : public OpRewritePattern<WaitOp> {
+public:
+  using OpRewritePattern::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(WaitOp op,
+                                PatternRewriter &rewriter) const final {
+    auto predicate = [](Value value) {
+      auto waitOp = value.getDefiningOp<WaitOp>();
+      return waitOp && waitOp->getNumOperands() == 0;
+    };
+    if (llvm::none_of(op.asyncDependencies(), predicate))
+      return failure();
+    SmallVector<Value> validOperands;
+    for (Value operand : op->getOperands()) {
+      if (predicate(operand))
+        continue;
+      validOperands.push_back(operand);
+    }
+    op->setOperands(validOperands);
+    return success();
+  }
+};
+
+/// Simplify trivial gpu.wait ops for the following patterns.
+/// 1. %t = gpu.wait async ... ops, where %t has no uses (regardless of async
+/// dependencies).
+/// 2. %t1 = gpu.wait async [%t0], in this case, we can replace uses of %t1 with
+/// %t0.
+/// 3. gpu.wait [] ops, i.e gpu.wait ops that neither have any async
+/// dependencies nor return any token.
+struct SimplifyGpuWaitOp : public OpRewritePattern<WaitOp> {
+public:
+  using OpRewritePattern::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(WaitOp op,
+                                PatternRewriter &rewriter) const final {
+    // Erase gpu.wait ops that neither have any async dependencies nor return
+    // any async token.
+    if (op.asyncDependencies().empty() && !op.asyncToken()) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+    // Replace uses of %t1 = gpu.wait async [%t0] ops with %t0 and erase the op.
+    if (llvm::hasSingleElement(op.asyncDependencies()) && op.asyncToken()) {
+      rewriter.replaceOp(op, op.asyncDependencies());
+      return success();
+    }
+    // Erase %t = gpu.wait async ... ops, where %t has no uses.
+    if (op.asyncToken() && op.asyncToken().use_empty()) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+    return failure();
+  }
+};
+
+} // end anonymous namespace
+
+void WaitOp::getCanonicalizationPatterns(RewritePatternSet &results,
+                                         MLIRContext *context) {
+  results.add<EraseRedundantGpuWaitOpPairs, SimplifyGpuWaitOp>(context);
+}
+
+//===----------------------------------------------------------------------===//
 // GPU_AllocOp
 //===----------------------------------------------------------------------===//
 
-static LogicalResult verify(AllocOp op) {
-  auto memRefType = op.memref().getType().cast<MemRefType>();
+LogicalResult AllocOp::verify() {
+  auto memRefType = memref().getType().cast<MemRefType>();
 
-  if (static_cast<int64_t>(op.dynamicSizes().size()) !=
+  if (static_cast<int64_t>(dynamicSizes().size()) !=
       memRefType.getNumDynamicDims())
-    return op.emitOpError("dimension operand count does not equal memref "
-                          "dynamic dimension count");
+    return emitOpError("dimension operand count does not equal memref "
+                       "dynamic dimension count");
 
   unsigned numSymbols = 0;
   if (!memRefType.getLayout().isIdentity())
     numSymbols = memRefType.getLayout().getAffineMap().getNumSymbols();
-  if (op.symbolOperands().size() != numSymbols)
-    return op.emitOpError("symbol operand count does not equal memref symbol "
-                          "count");
+  if (symbolOperands().size() != numSymbols) {
+    return emitOpError(
+        "symbol operand count does not equal memref symbol count");
+  }
 
   return success();
 }
@@ -1230,15 +1377,6 @@ void AllocOp::getCanonicalizationPatterns(RewritePatternSet &results,
 //===----------------------------------------------------------------------===//
 // GPU_DeviceAsyncCopyOp
 //===----------------------------------------------------------------------===//
-
-/// Return true if the last dimension of the MemRefType has unit stride. Also
-/// return true for memrefs with no strides.
-static bool isLastMemrefDimUnitStride(MemRefType type) {
-  int64_t offset;
-  SmallVector<int64_t> strides;
-  auto successStrides = getStridesAndOffset(type, strides, offset);
-  return succeeded(successStrides) && (strides.empty() || strides.back() == 1);
-}
 
 LogicalResult DeviceAsyncCopyOp::verify() {
   auto srcMemref = src().getType().cast<MemRefType>();

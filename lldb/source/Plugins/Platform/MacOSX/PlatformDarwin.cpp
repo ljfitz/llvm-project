@@ -48,9 +48,6 @@
 using namespace lldb;
 using namespace lldb_private;
 
-/// Default Constructor
-PlatformDarwin::PlatformDarwin(bool is_host) : PlatformPOSIX(is_host) {}
-
 /// Destructor.
 ///
 /// The destructor is virtual since this class is designed to be
@@ -88,8 +85,8 @@ FileSpecList PlatformDarwin::LocateExecutableScriptingResources(
         if (objfile) {
           FileSpec symfile_spec(objfile->GetFileSpec());
           if (symfile_spec &&
-              strcasestr(symfile_spec.GetPath().c_str(),
-                         ".dSYM/Contents/Resources/DWARF") != nullptr &&
+              llvm::StringRef(symfile_spec.GetPath())
+                  .contains_insensitive(".dSYM/Contents/Resources/DWARF") &&
               FileSystem::Instance().Exists(symfile_spec)) {
             while (module_spec.GetFilename()) {
               std::string module_basename(

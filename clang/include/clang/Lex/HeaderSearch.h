@@ -155,7 +155,7 @@ public:
 /// This structure is used to record entries in our framework cache.
 struct FrameworkCacheEntry {
   /// The directory entry which should be used for the cached framework.
-  const DirectoryEntry *Directory;
+  Optional<DirectoryEntryRef> Directory;
 
   /// Whether this framework has been "user-specified" to be treated as if it
   /// were a system framework (even if it was found outside a system framework
@@ -561,6 +561,7 @@ public:
 
   /// Determine which HeaderSearchOptions::UserEntries have been successfully
   /// used so far and mark their index with 'true' in the resulting bit vector.
+  /// Note: implicit module maps don't contribute to entry usage.
   std::vector<bool> computeUserEntryUsage() const;
 
   /// This method returns a HeaderMap for the specified

@@ -97,6 +97,46 @@ Sema::ActOnGlobalModuleFragmentDecl(SourceLocation ModuleLoc) {
   return nullptr;
 }
 
+void Sema::HandleStartOfHeaderUnit() {
+  assert(getLangOpts().CPlusPlusModules &&
+         "Header units are only valid for C++20 modules");
+  SourceLocation StartOfTU =
+      SourceMgr.getLocForStartOfFile(SourceMgr.getMainFileID());
+
+  StringRef HUName = getLangOpts().CurrentModule;
+  if (HUName.empty()) {
+    HUName = SourceMgr.getFileEntryForID(SourceMgr.getMainFileID())->getName();
+    const_cast<LangOptions &>(getLangOpts()).CurrentModule = HUName.str();
+  }
+
+  // TODO: Make the C++20 header lookup independent.
+  // When the input is pre-processed source, we need a file ref to the original
+  // file for the header map.
+  auto F = SourceMgr.getFileManager().getFile(HUName);
+  // For the sake of error recovery (if someone has moved the original header
+  // after creating the pre-processed output) fall back to obtaining the file
+  // ref for the input file, which must be present.
+  if (!F)
+    F = SourceMgr.getFileEntryForID(SourceMgr.getMainFileID());
+  assert(F && "failed to find the header unit source?");
+  Module::Header H{HUName.str(), HUName.str(), *F};
+  auto &Map = PP.getHeaderSearchInfo().getModuleMap();
+  Module *Mod = Map.createHeaderUnit(StartOfTU, HUName, H);
+  assert(Mod && "module creation should not fail");
+  ModuleScopes.push_back({}); // No GMF
+  ModuleScopes.back().BeginLoc = StartOfTU;
+  ModuleScopes.back().Module = Mod;
+  ModuleScopes.back().ModuleInterface = true;
+  ModuleScopes.back().IsPartition = false;
+  VisibleModules.setVisible(Mod, StartOfTU);
+
+  // From now on, we have an owning module for all declarations we see.
+  // All of these are implicitly exported.
+  auto *TU = Context.getTranslationUnitDecl();
+  TU->setModuleOwnershipKind(Decl::ModuleOwnershipKind::Visible);
+  TU->setLocalOwningModule(Mod);
+}
+
 Sema::DeclGroupPtrTy
 Sema::ActOnModuleDecl(SourceLocation StartLoc, SourceLocation ModuleLoc,
                       ModuleDeclKind MDK, ModuleIdPath Path,
@@ -149,6 +189,7 @@ Sema::ActOnModuleDecl(SourceLocation StartLoc, SourceLocation ModuleLoc,
     return nullptr;
 
   case LangOptions::CMK_HeaderModule:
+  case LangOptions::CMK_HeaderUnit:
     Diag(ModuleLoc, diag::err_module_decl_in_header_module);
     return nullptr;
   }
@@ -173,7 +214,7 @@ Sema::ActOnModuleDecl(SourceLocation StartLoc, SourceLocation ModuleLoc,
       ModuleScopes.back().Module->Kind == Module::GlobalModuleFragment)
     GlobalModuleFragment = ModuleScopes.back().Module;
 
-  assert((!getLangOpts().CPlusPlusModules ||
+  assert((!getLangOpts().CPlusPlusModules || getLangOpts().ModulesTS ||
           SeenGMF == (bool)GlobalModuleFragment) &&
          "mismatched global module state");
 
@@ -310,6 +351,7 @@ Sema::ActOnPrivateModuleFragmentDecl(SourceLocation ModuleLoc,
   case Module::GlobalModuleFragment:
   case Module::ModulePartitionImplementation:
   case Module::ModulePartitionInterface:
+  case Module::ModuleHeaderUnit:
     Diag(PrivateLoc, diag::err_private_module_fragment_not_module);
     return nullptr;
 
@@ -365,13 +407,10 @@ Sema::ActOnPrivateModuleFragmentDecl(SourceLocation ModuleLoc,
 DeclResult Sema::ActOnModuleImport(SourceLocation StartLoc,
                                    SourceLocation ExportLoc,
                                    SourceLocation ImportLoc, ModuleIdPath Path,
-                                   ModuleIdPath Partition) {
+                                   bool IsPartition) {
 
-  bool IsPartition = !Partition.empty();
   bool Cxx20Mode = getLangOpts().CPlusPlusModules || getLangOpts().ModulesTS;
   assert((!IsPartition || Cxx20Mode) && "partition seen in non-C++20 code?");
-  assert((!IsPartition || Path.empty()) &&
-         "trying to import a partition with its named module specified?");
 
   // For a C++20 module name, flatten into a single identifier with the source
   // location of the first component.
@@ -382,20 +421,13 @@ DeclResult Sema::ActOnModuleImport(SourceLocation StartLoc,
     // We already checked that we are in a module purview in the parser.
     assert(!ModuleScopes.empty() && "in a module purview, but no module?");
     Module *NamedMod = ModuleScopes.back().Module;
-    if (ModuleScopes.back().IsPartition) {
-      // We're importing a partition into a partition, find the name of the
-      // owning named module.
-      size_t P = NamedMod->Name.find_first_of(":");
-      ModuleName = NamedMod->Name.substr(0, P + 1);
-    } else {
-      // We're importing a partition into the named module itself (either the
-      // interface or an implementation TU).
-      ModuleName = NamedMod->Name;
-      ModuleName += ":";
-    }
-    ModuleName += stringFromPath(Partition);
-    ModuleNameLoc = {PP.getIdentifierInfo(ModuleName), Partition[0].second};
-    Partition = ModuleIdPath(ModuleNameLoc);
+    // If we are importing into a partition, find the owning named module,
+    // otherwise, the name of the importing named module.
+    ModuleName = NamedMod->getPrimaryModuleInterfaceName().str();
+    ModuleName += ":";
+    ModuleName += stringFromPath(Path);
+    ModuleNameLoc = {PP.getIdentifierInfo(ModuleName), Path[0].second};
+    Path = ModuleIdPath(ModuleNameLoc);
   } else if (Cxx20Mode) {
     ModuleName = stringFromPath(Path);
     ModuleNameLoc = {PP.getIdentifierInfo(ModuleName), Path[0].second};
@@ -403,21 +435,25 @@ DeclResult Sema::ActOnModuleImport(SourceLocation StartLoc,
   }
 
   // Diagnose self-import before attempting a load.
+  // [module.import]/9
+  // A module implementation unit of a module M that is not a module partition
+  // shall not contain a module-import-declaration nominating M.
+  // (for an implementation, the module interface is imported implicitly,
+  //  but that's handled in the module decl code).
+
   if (getLangOpts().CPlusPlusModules && isCurrentModulePurview() &&
       getCurrentModule()->Name == ModuleName) {
-    Diag(ImportLoc, diag::err_module_self_import)
-        << ModuleName << getLangOpts().CurrentModule;
+    Diag(ImportLoc, diag::err_module_self_import_cxx20)
+        << ModuleName << !ModuleScopes.back().ModuleInterface;
     return true;
   }
 
   Module *Mod = getModuleLoader().loadModule(
-      ImportLoc, IsPartition ? Partition : Path, Module::AllVisible,
-      /*IsInclusionDirective=*/false);
+      ImportLoc, Path, Module::AllVisible, /*IsInclusionDirective=*/false);
   if (!Mod)
     return true;
 
-  return ActOnModuleImport(StartLoc, ExportLoc, ImportLoc, Mod,
-                           IsPartition ? Partition : Path);
+  return ActOnModuleImport(StartLoc, ExportLoc, ImportLoc, Mod, Path);
 }
 
 /// Determine whether \p D is lexically within an export-declaration.
@@ -440,8 +476,7 @@ DeclResult Sema::ActOnModuleImport(SourceLocation StartLoc,
   // of the same top-level module. Until we do, make it an error rather than
   // silently ignoring the import.
   // FIXME: Should we warn on a redundant import of the current module?
-  if (!getLangOpts().CPlusPlusModules &&
-      Mod->getTopLevelModuleName() == getLangOpts().CurrentModule &&
+  if (Mod->getTopLevelModuleName() == getLangOpts().CurrentModule &&
       (getLangOpts().isCompilingModule() || !getLangOpts().ModulesTS)) {
     Diag(ImportLoc, getLangOpts().isCompilingModule()
                         ? diag::err_module_self_import
@@ -482,7 +517,18 @@ DeclResult Sema::ActOnModuleImport(SourceLocation StartLoc,
   if (!ModuleScopes.empty())
     Context.addModuleInitializer(ModuleScopes.back().Module, Import);
 
-  if (!ModuleScopes.empty() && ModuleScopes.back().ModuleInterface) {
+  // A module (partition) implementation unit shall not be exported.
+  if (getLangOpts().CPlusPlusModules && ExportLoc.isValid() &&
+      Mod->Kind == Module::ModuleKind::ModulePartitionImplementation) {
+    Diag(ExportLoc, diag::err_export_partition_impl)
+        << SourceRange(ExportLoc, Path.back().second);
+  } else if (!ModuleScopes.empty() &&
+             (ModuleScopes.back().ModuleInterface ||
+              (getLangOpts().CPlusPlusModules &&
+               ModuleScopes.back().Module->isGlobalModule()))) {
+    assert((!ModuleScopes.back().Module->isGlobalModule() ||
+            Mod->Kind == Module::ModuleKind::ModuleHeaderUnit) &&
+           "should only be importing a header unit into the GMF");
     // Re-export the module if the imported module is exported.
     // Note that we don't need to add re-exported module to Imports field
     // since `Exports` implies the module is imported already.
@@ -494,13 +540,20 @@ DeclResult Sema::ActOnModuleImport(SourceLocation StartLoc,
     // [module.interface]p1:
     // An export-declaration shall inhabit a namespace scope and appear in the
     // purview of a module interface unit.
-    Diag(ExportLoc, diag::err_export_not_in_module_interface) << 0;
+    Diag(ExportLoc, diag::err_export_not_in_module_interface)
+        << (!ModuleScopes.empty() &&
+            !ModuleScopes.back().ImplicitGlobalModuleFragment);
   } else if (getLangOpts().isCompilingModule()) {
     Module *ThisModule = PP.getHeaderSearchInfo().lookupModule(
         getLangOpts().CurrentModule, ExportLoc, false, false);
     (void)ThisModule;
     assert(ThisModule && "was expecting a module if building one");
   }
+
+  // In some cases we need to know if an entity was present in a directly-
+  // imported module (as opposed to a transitive import).  This avoids
+  // searching both Imports and Exports.
+  DirectModuleImports.insert(Mod);
 
   return Import;
 }
@@ -709,6 +762,7 @@ enum class UnnamedDeclKind {
   StaticAssert,
   Asm,
   UsingDirective,
+  Namespace,
   Context
 };
 }
@@ -738,6 +792,10 @@ unsigned getUnnamedDeclDiag(UnnamedDeclKind UDK, bool InBlock) {
     // Allow exporting using-directives as an extension.
     return diag::ext_export_using_directive;
 
+  case UnnamedDeclKind::Namespace:
+    // Anonymous namespace with no content.
+    return diag::introduces_no_names;
+
   case UnnamedDeclKind::Context:
     // Allow exporting DeclContexts that transitively contain no declarations
     // as an extension.
@@ -765,10 +823,12 @@ static bool checkExportedDecl(Sema &S, Decl *D, SourceLocation BlockStart) {
     diagExportedUnnamedDecl(S, *UDK, D, BlockStart);
 
   //   [...] shall not declare a name with internal linkage.
+  bool HasName = false;
   if (auto *ND = dyn_cast<NamedDecl>(D)) {
     // Don't diagnose anonymous union objects; we'll diagnose their members
     // instead.
-    if (ND->getDeclName() && ND->getFormalLinkage() == InternalLinkage) {
+    HasName = (bool)ND->getDeclName();
+    if (HasName && ND->getFormalLinkage() == InternalLinkage) {
       S.Diag(ND->getLocation(), diag::err_export_internal) << ND;
       if (BlockStart.isValid())
         S.Diag(BlockStart, diag::note_export);
@@ -780,8 +840,10 @@ static bool checkExportedDecl(Sema &S, Decl *D, SourceLocation BlockStart) {
   //   shall have been introduced with a name having external linkage
   if (auto *USD = dyn_cast<UsingShadowDecl>(D)) {
     NamedDecl *Target = USD->getUnderlyingDecl();
-    if (Target->getFormalLinkage() == InternalLinkage) {
-      S.Diag(USD->getLocation(), diag::err_export_using_internal) << Target;
+    Linkage Lk = Target->getFormalLinkage();
+    if (Lk == InternalLinkage || Lk == ModuleLinkage) {
+      S.Diag(USD->getLocation(), diag::err_export_using_internal)
+          << (Lk == InternalLinkage ? 0 : 1) << Target;
       S.Diag(Target->getLocation(), diag::note_using_decl_target);
       if (BlockStart.isValid())
         S.Diag(BlockStart, diag::note_export);
@@ -789,10 +851,17 @@ static bool checkExportedDecl(Sema &S, Decl *D, SourceLocation BlockStart) {
   }
 
   // Recurse into namespace-scope DeclContexts. (Only namespace-scope
-  // declarations are exported.)
-  if (auto *DC = dyn_cast<DeclContext>(D))
-    if (DC->getRedeclContext()->isFileContext() && !isa<EnumDecl>(D))
+  // declarations are exported.).
+  if (auto *DC = dyn_cast<DeclContext>(D)) {
+    if (isa<NamespaceDecl>(D) && DC->decls().empty()) {
+      if (!HasName)
+        // We don't allow an empty anonymous namespace (we don't allow decls
+        // in them either, but that's handled in the recursion).
+        diagExportedUnnamedDecl(S, UnnamedDeclKind::Namespace, D, BlockStart);
+      // We allow an empty named namespace decl.
+    } else if (DC->getRedeclContext()->isFileContext() && !isa<EnumDecl>(D))
       return checkExportedDeclContext(S, DC, BlockStart);
+  }
   return false;
 }
 

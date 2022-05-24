@@ -639,7 +639,7 @@ from mlir.dialects import builtin
 with Context():
   module = Module.create()
   with InsertionPoint(module.body), Location.unknown():
-    func = builtin.FuncOp("main", ([], []))
+    func = func.FuncOp("main", ([], []))
 ```
 
 Also see below for constructors generated from ODS.
@@ -660,12 +660,12 @@ with Context():
   with InsertionPoint(module.body), Location.unknown():
     # Operations can be created in a generic way.
     func = Operation.create(
-        "builtin.func", results=[], operands=[],
-        attributes={"type":TypeAttr.get(FunctionType.get([], []))},
+        "func.func", results=[], operands=[],
+        attributes={"function_type":TypeAttr.get(FunctionType.get([], []))},
         successors=None, regions=1)
     # The result will be downcasted to the concrete `OpView` subclass if
     # available.
-    assert isinstance(func, builtin.FuncOp)
+    assert isinstance(func, func.FuncOp)
 ```
 
 Regions are created for an operation when constructing it on the C++ side. They
@@ -885,16 +885,16 @@ Each dialect with a mapping to python requires that an appropriate
 `_{DIALECT_NAMESPACE}_ops_gen.py` wrapper module is created. This is done by
 invoking `mlir-tblgen` on a python-bindings specific tablegen wrapper that
 includes the boilerplate and actual dialect specific `td` file. An example, for
-the `StandardOps` (which is assigned the namespace `std` as a special case):
+the `Func` (which is assigned the namespace `func` as a special case):
 
 ```tablegen
-#ifndef PYTHON_BINDINGS_STANDARD_OPS
-#define PYTHON_BINDINGS_STANDARD_OPS
+#ifndef PYTHON_BINDINGS_FUNC_OPS
+#define PYTHON_BINDINGS_FUNC_OPS
 
 include "mlir/Bindings/Python/Attributes.td"
-include "mlir/Dialect/StandardOps/IR/Ops.td"
+include "mlir/Dialect/Func/IR/FuncOps.td"
 
-#endif
+#endif // PYTHON_BINDINGS_FUNC_OPS
 ```
 
 In the main repository, building the wrapper is done via the CMake function

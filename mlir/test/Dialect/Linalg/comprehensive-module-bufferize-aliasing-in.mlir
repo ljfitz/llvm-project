@@ -1,8 +1,8 @@
-// RUN: mlir-opt %s -linalg-comprehensive-module-bufferize="allow-return-memref always-aliasing-with-dest=0" -split-input-file | FileCheck %s
+// RUN: mlir-opt %s -linalg-comprehensive-module-bufferize="allow-return-allocs always-aliasing-with-dest=0" -split-input-file | FileCheck %s
 
 // CHECK-LABEL: func @linalg_op_bufferizes_inplace_with_input
 //  CHECK-SAME:     %[[t1:.*]]: memref<?x?xf32, #{{.*}}>, %[[t2:.*]]: memref<?xf32, #{{.*}}>, %[[t3:.*]]: memref<?x?xf32, #{{.*}}>
-func @linalg_op_bufferizes_inplace_with_input(
+func.func @linalg_op_bufferizes_inplace_with_input(
     %t1: tensor<?x?xf32> {linalg.inplaceable = true},
     %t2: tensor<?xf32> {linalg.inplaceable = false},
     %t3: tensor<?x?xf32> {linalg.inplaceable = false},
@@ -26,7 +26,7 @@ func @linalg_op_bufferizes_inplace_with_input(
 
 // CHECK-LABEL: func @linalg_op_bufferizes_out_of_place_with_input
 //  CHECK-SAME:     %[[t1:.*]]: memref<?x?xf32, #{{.*}}>, %[[t2:.*]]: memref<?xf32, #{{.*}}>, %[[t3:.*]]: memref<?x?xf32, #{{.*}}>
-func @linalg_op_bufferizes_out_of_place_with_input(
+func.func @linalg_op_bufferizes_out_of_place_with_input(
     %t1: tensor<?x?xf32> {linalg.inplaceable = false},
     %t2: tensor<?xf32> {linalg.inplaceable = false},
     %t3: tensor<?x?xf32> {linalg.inplaceable = false},
@@ -53,7 +53,7 @@ func @linalg_op_bufferizes_out_of_place_with_input(
 
 // CHECK-LABEL: func @linalg_op_output_cannot_alias_with_input
 //  CHECK-SAME:     %[[t1:.*]]: memref<?x?xf32, #{{.*}}>, %[[t2:.*]]: memref<?xf32, #{{.*}}>, %[[t3:.*]]: memref<?x?xf32, #{{.*}}>
-func @linalg_op_output_cannot_alias_with_input(
+func.func @linalg_op_output_cannot_alias_with_input(
     %t1: tensor<?x?xf32> {linalg.inplaceable = true},
     %t2: tensor<?xf32> {linalg.inplaceable = false},
     %t3: tensor<?x?xf32> {linalg.inplaceable = true},

@@ -12,9 +12,8 @@
 // RUN: %clang_cc1 -std=c++20 -emit-module-interface %t/std10-1-ex2-tu3.cpp \
 // RUN:   -o %t/B_X1.pcm -verify
 
-// Not expected to work yet.
-//  %clang_cc1 -std=c++20 -emit-module-interface %t/std10-1-ex2-tu4.cpp \
-//   -fmodule-file=%t/B.pcm  -o %t/B_X2.pcm
+// RUN: %clang_cc1 -std=c++20 -emit-module-interface %t/std10-1-ex2-tu4.cpp \
+// RUN:-fmodule-file=%t/B.pcm  -o %t/B_X2.pcm
 
 // RUN: %clang_cc1 -std=c++20 -emit-obj %t/std10-1-ex2-tu5.cpp \
 // RUN:  -fmodule-file=%t/B.pcm  -o %t/b_tu5.o
@@ -22,9 +21,8 @@
 // RUN: %clang_cc1 -std=c++20 -S %t/std10-1-ex2-tu6.cpp \
 // RUN:  -fmodule-file=%t/B.pcm  -o %t/b_tu6.s -verify
 
-// Not expected to work yet.
-//  %clang_cc1 -std=c++20 -emit-module-interface %t/std10-1-ex2-tu7.cpp \
-//   -fmodule-file=%t/B_X2.pcm  -o %t/B_X3.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -emit-module-interface %t/std10-1-ex2-tu7.cpp \
+// RUN: -fmodule-file=%t/B_X2.pcm  -o %t/B_X3.pcm -verify
 
 //--- std10-1-ex2-tu1.cpp
 module B:Y;
@@ -58,7 +56,14 @@ import B;
 int &c = n; // expected-error {{use of undeclared identifier}}
 
 //--- std10-1-ex2-tu7.cpp
+// expected-no-diagnostics
 module B:X3; // does not implicitly import B
-import :X2;  // X2 is an implementation so exports nothing.
-             // error: n not visible here.
-int &c = n;  // expected-error {{use of undeclared identifier }}
+import :X2; // X2 is an implementation unit import B.
+// According to [module.import]p7:
+//   Additionally, when a module-import-declaration in a module unit of some
+//   module M imports another module unit U of M, it also imports all
+//   translation units imported by non-exported module-import-declarations in
+//   the module unit purview of U.
+//
+// So B is imported in B:X3 due to B:X2 imported B. So n is visible here.
+int &c = n;
