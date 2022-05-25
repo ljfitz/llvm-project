@@ -673,6 +673,10 @@ LogicalResult SoftmaxOp::verify() {
     return failure();
   if (inputTensor.getShape() != outputTensor.getShape())
     return emitOpError("input and output dimensions must be the same");
+
+  auto dimS = dimAttr().getValue().getSExtValue();
+  if (dimS >= inputTensor.getRank() || dimS < -inputTensor.getRank())
+    return emitOpError("dim must be in range [-inputRank, inputRank)");
   return success();
 }
 
