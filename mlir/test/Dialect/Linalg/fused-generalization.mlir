@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -split-input-file -linalg-generalize-fused-ops | FileCheck %s
+// RUN: mlir-opt %s -split-input-file -linalg-unfuse | FileCheck %s
 
 // CHECK-LABEL: func @generalize_conv_2d_relu(
 // CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x17x17xf32>

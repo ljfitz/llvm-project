@@ -8,7 +8,6 @@ add_mlir_dialect_library(MLIRLinalgTransforms
   DropUnitDims.cpp
   ElementwiseOpFusion.cpp
   ElementwiseToLinalg.cpp
-  FusedGeneralization.cpp
   Fusion.cpp
   FusionOnTensors.cpp
   Generalization.cpp
@@ -24,6 +23,7 @@ add_mlir_dialect_library(MLIRLinalgTransforms
   SparseTensorRewriting.cpp
   Tiling.cpp
   Transforms.cpp
+  Unfuse.cpp
   Vectorization.cpp
 
   ADDITIONAL_HEADER_DIRS

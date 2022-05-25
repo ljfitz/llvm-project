@@ -1,4 +1,4 @@
-//===- FusedGeneralization.cpp - linalg fused ops to generic ops  ---------===//
+//===- Unfuse.cpp - linalg fused ops to simple ops  -----------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file implements the Linalg fused generalization pass. It converts named
-// Linalg fused ops to linalg.generic ops.
+// This file implements the Linalg unfuse pass. It converts the named fused
+// ops into simple ones with generalizable lowering.
 //
 //===----------------------------------------------------------------------===//
 
@@ -24,7 +24,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 
-#define DEBUG_TYPE "linalg-fused-generalization"
+#define DEBUG_TYPE "linalg-unfuse"
 
 using namespace mlir;
 using namespace mlir::linalg;
@@ -168,8 +168,8 @@ struct Conv2DLreluMaxpoolOpLowering : OpRewritePattern<Conv2DLreluMaxpoolOp> {
     }
 };
 
-struct LinalgFusedGeneralizationPass 
-    : public LinalgFusedGeneralizationBase<LinalgFusedGeneralizationPass> {
+struct LinalgUnfusePass 
+    : public LinalgUnfuseBase<LinalgUnfusePass> {
     void runOnOperation() override 
     {
         RewritePatternSet patterns(&getContext());
@@ -189,6 +189,6 @@ struct LinalgFusedGeneralizationPass
 
 } // namespace
 
-std::unique_ptr<OperationPass<FuncOp>> mlir::createLinalgFusedGeneralizationPass() {
-    return std::make_unique<LinalgFusedGeneralizationPass>();
+std::unique_ptr<OperationPass<FuncOp>> mlir::createLinalgUnfusePass() {
+    return std::make_unique<LinalgUnfusePass>();
 }
