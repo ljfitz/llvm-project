@@ -222,6 +222,16 @@ def LinalgGeneralization : Pass<"linalg-generalize-named-ops", "FuncOp"> {
   let dependentDialects = ["linalg::LinalgDialect"];
 }
 
+def LinalgFusedGeneralization : Pass<"linalg-generalize-fused-ops", "FuncOp"> {
+  let summary = "Convert fused named ops into generic ops, but do it right";
+  let constructor = "mlir::createLinalgFusedGeneralizationPass()";
+  let dependentDialects = [
+    "linalg::LinalgDialect", 
+    "tensor::TensorDialect",
+    "arith::ArithmeticDialect"
+  ];
+}
+
 def LinalgDetensorize : Pass<"linalg-detensorize", ""> {
   let summary = "Detensorize linalg ops";
   let constructor = "mlir::createLinalgDetensorizePass()";

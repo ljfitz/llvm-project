@@ -78,6 +78,9 @@ std::unique_ptr<OperationPass<FuncOp>> createLinalgBufferizePass();
 /// operations.
 std::unique_ptr<OperationPass<FuncOp>> createLinalgGeneralizationPass();
 
+/// Create a pass to convert fused named ops into generic ops, but do it right
+std::unique_ptr<OperationPass<FuncOp>> createLinalgFusedGeneralizationPass();
+
 /// Create a pass to convert Linalg operations to equivalent operations that
 /// work on primitive types, if possible.
 std::unique_ptr<Pass> createLinalgDetensorizePass();
