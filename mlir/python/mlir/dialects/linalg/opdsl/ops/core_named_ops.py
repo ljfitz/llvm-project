@@ -87,6 +87,37 @@ def conv_2d_lrelu_maxpool(
            ]) * TypeFn.cast(U, K[D.f, D.c, D.kh, D.kw]))
 
 @linalg_structured_op
+def relu_2d_Nchw(
+    IFM=TensorDef(T1, Batch, S.C, S.OH, S.OW),
+    OFM=TensorDef(T1, Batch, S.C, S.OH, S.OW, output=True)):
+  """Applies the ReLU activation function to every value in the tensor.
+  
+  Layout:
+    * Input: NCHW
+  """
+  domain(D.b, D.c, D.oh, D.ow)
+  OFM[D.b, D.c, D.oh, D.ow] = BinaryFn.max(
+    IFM[D.b, D.c, D.oh, D.ow], TypeFn.cast(T1, const(0.0))
+  )
+
+@linalg_structured_op
+def lrelu_2d_Nchw(
+    IFM=TensorDef(T1, Batch, S.C, S.OH, S.OW),
+    alpha=ScalarDef(T1),
+    OFM=TensorDef(T1, Batch, S.C, S.OH, S.OW, output=True)):
+  """Applies the leaky ReLU activation function to every value in the tensor.
+  
+  Layout:
+    * Input: NCHW
+  """
+  domain(D.b, D.c, D.oh, D.ow)
+  zero = TypeFn.cast(T1, const(0.0))
+  pos = BinaryFn.max(IFM[D.b, D.c, D.oh, D.ow], zero)
+  neg = IFM[D.b, D.c, D.oh, D.ow] * alpha
+  leak = BinaryFn.min(neg, zero)
+  OFM[D.b, D.c, D.oh, D.ow] = pos + leak
+
+@linalg_structured_op
 def matmul(
     A=TensorDef(T1, S.M, S.K),
     B=TensorDef(T2, S.K, S.N),
