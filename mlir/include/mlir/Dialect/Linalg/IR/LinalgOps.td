@@ -193,7 +193,7 @@ def Linalg_IndexOp : Linalg_Op<"index", [NoSideEffect]>,
 
 def Linalg_SoftmaxOp : Linalg_Op<"softmax", [NoSideEffect]> {
   let arguments = (ins AnyTensor:$input,
-                      Confined<I64Attr, [IntMinValue<0>]>:$dim);
+                       I64Attr:$dim);
   let results = (outs AnyTensor:$result);
   let summary = "linalg softmax operation";
   let description = [{
