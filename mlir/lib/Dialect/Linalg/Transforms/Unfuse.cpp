@@ -35,15 +35,15 @@ Value applyBias(Location loc, Value target, Value bias, OpBuilder &builder)
 {
     auto targetTy = target.getType().cast<RankedTensorType>();
     auto biasTy = bias.getType().cast<RankedTensorType>();
-    
+
     // target: NxFxHOxWO of T, bias: F of T
     assert(targetTy.getRank() == 4 && biasTy.getRank() == 1);
     assert(targetTy.getElementType() == biasTy.getElementType());
     assert(targetTy.getShape()[1] == biasTy.getShape()[0]);
 
-    Value inputs[] = { 
-        /*IFM=*/target, 
-        /*bias=*/bias 
+    Value inputs[] = {
+        /*IFM=*/target,
+        /*bias=*/bias
     };
     return builder.create<ApplyBias2DFchwOp>(
         /*location=*/loc,
@@ -56,9 +56,9 @@ Value applyBias(Location loc, Value target, Value bias, OpBuilder &builder)
 struct Conv2DReluLowering : OpRewritePattern<Conv2DReluOp> {
     using OpRewritePattern<Conv2DReluOp>::OpRewritePattern;
     LogicalResult matchAndRewrite(
-        Conv2DReluOp op, 
+        Conv2DReluOp op,
         PatternRewriter &rewriter
-    ) const override 
+    ) const override
     {
         assert(op.getNumInputs() == 3);
 
@@ -105,9 +105,9 @@ struct Conv2DReluLowering : OpRewritePattern<Conv2DReluOp> {
 struct Conv2DLreluOpLowering : OpRewritePattern<Conv2DLreluOp> {
     using OpRewritePattern<Conv2DLreluOp>::OpRewritePattern;
     LogicalResult matchAndRewrite(
-        Conv2DLreluOp op, 
+        Conv2DLreluOp op,
         PatternRewriter &rewriter
-    ) const override 
+    ) const override
     {
         assert(op.getNumInputs() == 4);
 
@@ -152,7 +152,7 @@ struct Conv2DLreluOpLowering : OpRewritePattern<Conv2DLreluOp> {
                 /*outputs=*/convResult
             );
         }
-        
+
         return success();
     }
 };
@@ -160,28 +160,28 @@ struct Conv2DLreluOpLowering : OpRewritePattern<Conv2DLreluOp> {
 struct Conv2DLreluMaxpoolOpLowering : OpRewritePattern<Conv2DLreluMaxpoolOp> {
     using OpRewritePattern<Conv2DLreluMaxpoolOp>::OpRewritePattern;
     LogicalResult matchAndRewrite(
-        Conv2DLreluMaxpoolOp op, 
+        Conv2DLreluMaxpoolOp op,
         PatternRewriter &rewriter
-    ) const override 
-    {    
+    ) const override
+    {
         return failure();
     }
 };
 
-struct LinalgUnfusePass 
+struct LinalgUnfusePass
     : public LinalgUnfuseBase<LinalgUnfusePass> {
-    void runOnOperation() override 
+    void runOnOperation() override
     {
         RewritePatternSet patterns(&getContext());
-        
+
         patterns.add<
-            Conv2DReluLowering, 
-            Conv2DLreluOpLowering, 
+            Conv2DReluLowering,
+            Conv2DLreluOpLowering,
             Conv2DLreluMaxpoolOpLowering
         >(&getContext());
 
         (void)applyPatternsAndFoldGreedily(
-            getOperation().getBody(), 
+            getOperation().getBody(),
             std::move(patterns)
         );
     }
