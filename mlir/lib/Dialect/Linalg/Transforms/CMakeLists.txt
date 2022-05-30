@@ -25,6 +25,7 @@ add_mlir_dialect_library(MLIRLinalgTransforms
   SplitReduction.cpp
   Tiling.cpp
   Transforms.cpp
+  Unfuse.cpp
   Vectorization.cpp
 
   ADDITIONAL_HEADER_DIRS
