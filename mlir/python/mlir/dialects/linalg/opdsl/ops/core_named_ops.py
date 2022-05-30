@@ -85,6 +85,50 @@ def conv_2d_lrelu_maxpool(
       U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH, D.ow * S.SW + D.kw * S.DW
            ]) * TypeFn.cast_signed(U, K[D.f, D.c, D.kh, D.kw]))
 
+@linalg_structured_op
+def relu_2d_nchw(
+    IFM=TensorDef(T1, Batch, S.C, S.OH, S.OW),
+    OFM=TensorDef(T1, Batch, S.C, S.OH, S.OW, output=True)):
+  """Applies the ReLU activation function to every value in the tensor.
+  
+  Layout:
+    * Input: NCHW
+  """
+  domain(D.b, D.c, D.oh, D.ow)
+  OFM[D.b, D.c, D.oh, D.ow] = BinaryFn.max_signed(
+    IFM[D.b, D.c, D.oh, D.ow], TypeFn.cast_signed(T1, const(0.0))
+  )
+
+@linalg_structured_op
+def lrelu_2d_nchw(
+    IFM=TensorDef(T1, Batch, S.C, S.OH, S.OW),
+    alpha=ScalarDef(T1),
+    OFM=TensorDef(T1, Batch, S.C, S.OH, S.OW, output=True)):
+  """Applies the leaky ReLU activation function to every value in the tensor.
+  
+  Layout:
+    * Input: NCHW
+  """
+  domain(D.b, D.c, D.oh, D.ow)
+  zero = TypeFn.cast_signed(T1, const(0.0))
+  pos = BinaryFn.max_signed(IFM[D.b, D.c, D.oh, D.ow], zero)
+  neg = IFM[D.b, D.c, D.oh, D.ow] * alpha
+  leak = BinaryFn.min_signed(neg, zero)
+  OFM[D.b, D.c, D.oh, D.ow] = pos + leak
+
+@linalg_structured_op
+def apply_bias_2d_fchw(
+    IFM=TensorDef(T1, Batch, S.F, S.OH, S.OW),
+    bias=TensorDef(T1, S.F),
+    OFM=TensorDef(T1, Batch, S.F, S.OH, S.OW, output=True)):
+  """Applies the bias value to the input tensor by broadcasting.
+  
+  Layout:
+    * Input: NFHW
+    * Bias: F
+  """
+  domain(D.b, D.f, D.oh, D.ow)
+  OFM[D.b, D.f, D.oh, D.ow] = IFM[D.b, D.f, D.oh, D.ow] + bias[D.f]
 
 # Standard linalg ops
 
