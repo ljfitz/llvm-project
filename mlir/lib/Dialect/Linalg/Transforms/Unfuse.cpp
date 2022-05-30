@@ -283,6 +283,26 @@ struct Conv2DLreluMaxpoolOpLowering : OpRewritePattern<Conv2DLreluMaxpoolOp> {
                 ValueRange()
             );
 
+            // Generate a padding value.
+            // BUG: xten -> linalg lowering does not pass along the padding
+            //      value! But maxpool is ususally padded with -inf.
+            Attribute padValue;
+            if (auto floatTy = elementTy.cast<FloatType>()) {
+                padValue = rewriter.getFloatAttr(
+                    floatTy,
+                    APFloat::getInf(floatTy.getFloatSemantics(), true)
+                );
+            } else if (auto intTy = elementTy.cast<IntegerType>()) {
+                padValue = rewriter.getIntegerAttr(
+                    intTy,
+                    intTy.isSigned()
+                        ? APInt::getSignedMinValue(intTy.getWidth()) 
+                        : APInt::getMinValue(intTy.getWidth())
+                );
+            } else {
+                llvm_unreachable("unsupported element type");
+            }
+
             // Insert the body.
             OpBuilder::InsertionGuard guard(rewriter);
             auto &region = padOp.region();
@@ -293,8 +313,7 @@ struct Conv2DLreluMaxpoolOpLowering : OpRewritePattern<Conv2DLreluMaxpoolOp> {
                 op.getLoc(),
                 rewriter.create<arith::ConstantOp>(
                     op.getLoc(),
-                    // TODO: Is maxpool always padded with 0?
-                    rewriter.getZeroAttr(elementTy)
+                    padValue
                 )
             );
 
