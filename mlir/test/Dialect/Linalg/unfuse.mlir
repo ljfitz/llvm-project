@@ -89,7 +89,7 @@ func @unfuse_conv_2d_lrelu_maxpool(%ifm : tensor<1x1024x15x15xf32>) -> tensor<1x
             mp_kernel_size = dense<2> : tensor<2xi64>,
             mp_stride = dense<2> : tensor<2xi64>,
             mp_dilation = dense<1> : tensor<2xi64>,
-            mp_padding = dense<[0, 0, 1, 1]> : tensor<4xi64>
+            mp_padding = dense<[0, 1, 0, 1]> : tensor<4xi64>
         }
         ins(%ifm, %weights, %bias, %alpha : tensor<1x1024x15x15xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>, f32)
         outs(%init : tensor<1x1024x7x7xf32>)
@@ -107,7 +107,7 @@ func @unfuse_conv_2d_lrelu_maxpool(%ifm : tensor<1x1024x15x15xf32>) -> tensor<1x
     // CHECK: ins(%[[conv]], %[[alpha]] :
     // CHECK: outs(%[[conv]] :
 
-    // CHECK: %[[padded:.*]] = tensor.pad %[[lrelu]]
+    // CHECK: %[[padded:.*]] = tensor.pad %[[lrelu]] low[0, 0, 0, 0] high[0, 0, 1, 1]
 
     // CHECK: %[[pool:.*]] = linalg.init_tensor [2, 2]
 
