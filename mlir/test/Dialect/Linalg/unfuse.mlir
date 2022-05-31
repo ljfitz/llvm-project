@@ -1,5 +1,35 @@
 // RUN: mlir-opt %s -split-input-file -linalg-unfuse | FileCheck %s
 
+// CHECK-LABEL: func @unfuse_conv_2d_tensor_add(
+// CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x10x10xf32>
+// CHECK-SAME: %[[summand:.+]]: tensor<1x1024x8x8xf32>
+func.func @unfuse_conv_2d_tensor_add(%ifm : tensor<1x1024x10x10xf32>, %summand : tensor<1x1024x8x8xf32>) -> tensor<1x1024x8x8xf32> {
+    %zero = arith.constant 0.0 : f32
+    // CHECK-DAG: %[[weights:.+]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
+    %weights = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
+    // CHECK-DAG: %[[bias:.+]] = arith.constant dense<3.000000e-01> : tensor<1024xf32>
+    %bias = arith.constant dense<3.000000e-01> : tensor<1024xf32>
+
+    %init = tensor.splat %zero : tensor<1x1024x8x8xf32>
+    %result = linalg.conv_2d_tensor_add
+        {dilation = dense<1> : tensor<2xi64>, stride = dense<1> : tensor<2xi64>}
+        ins(%ifm, %summand, %weights, %bias : tensor<1x1024x10x10xf32>, tensor<1x1024x8x8xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>)
+        outs(%init : tensor<1x1024x8x8xf32>)
+        -> tensor<1x1024x8x8xf32>
+
+    // CHECK: %[[preadd:.+]] = linalg.apply_bias_2d_fchw
+    // CHECK: ins(%[[summand]], %[[bias]] :
+
+    // CHECK: %[[out:.+]] = linalg.conv_2d_nchw_fchw
+    // CHECK: ins(%[[ifm]], %[[weights]] :
+    // CHECK: outs(%[[preadd]] :
+    
+    // CHECK: return %[[out]]
+    return %result : tensor<1x1024x8x8xf32>
+}
+
+// ----
+
 // CHECK-LABEL: func @unfuse_conv_2d_relu(
 // CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x17x17xf32>
 func.func @unfuse_conv_2d_relu(%ifm : tensor<1x1024x17x17xf32>) -> tensor<1x1024x7x7xf32> {
@@ -23,6 +53,40 @@ func.func @unfuse_conv_2d_relu(%ifm : tensor<1x1024x17x17xf32>) -> tensor<1x1024
     // CHECK: %[[conv:.+]] = linalg.conv_2d_nchw_fchw
     // CHECK: ins(%[[ifm]], %[[weights]] :
     // CHECK: outs(%[[biased]] :
+
+    // CHECK: %[[out:.+]] = linalg.relu_2d_nchw
+    // CHECK: ins(%[[conv]] :
+    // CHECK: outs(%[[conv]] :
+
+    // CHECK: return %[[out]]
+    return %result : tensor<1x1024x7x7xf32>
+}
+
+// ----
+
+// CHECK-LABEL: func @unfuse_conv_2d_tensor_add_relu(
+// CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x17x17xf32>
+// CHECK-SAME: %[[summand:.+]]: tensor<1x1024x7x7xf32>
+func.func @unfuse_conv_2d_tensor_add_relu(%ifm : tensor<1x1024x17x17xf32>, %summand : tensor<1x1024x7x7xf32>) -> tensor<1x1024x7x7xf32> {
+    %zero = arith.constant 0.0 : f32
+    // CHECK-DAG: %[[weights:.+]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
+    %weights = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
+    // CHECK-DAG: %[[bias:.+]] = arith.constant dense<3.000000e-01> : tensor<1024xf32>
+    %bias = arith.constant dense<3.000000e-01> : tensor<1024xf32>
+
+    %init = tensor.splat %zero : tensor<1x1024x7x7xf32>
+    %result = linalg.conv_2d_tensor_add_relu
+        {dilation = dense<2> : tensor<2xi64>, stride = dense<2> : tensor<2xi64>}
+        ins(%ifm, %summand, %weights, %bias : tensor<1x1024x17x17xf32>, tensor<1x1024x7x7xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>)
+        outs(%init : tensor<1x1024x7x7xf32>)
+        -> tensor<1x1024x7x7xf32>
+
+    // CHECK: %[[preadd:.+]] = linalg.apply_bias_2d_fchw
+    // CHECK: ins(%[[summand]], %[[bias]] :
+
+    // CHECK: %[[conv:.+]] = linalg.conv_2d_nchw_fchw
+    // CHECK: ins(%[[ifm]], %[[weights]] :
+    // CHECK: outs(%[[preadd]] :
 
     // CHECK: %[[out:.+]] = linalg.relu_2d_nchw
     // CHECK: ins(%[[conv]] :
@@ -59,6 +123,42 @@ func.func @unfuse_conv_2d_lrelu(%ifm : tensor<1x1024x15x15xf32>) -> tensor<1x102
     // CHECK: %[[conv:.+]] = linalg.conv_2d_nchw_fchw
     // CHECK: ins(%[[ifm]], %[[weights]] :
     // CHECK: outs(%[[biased]] :
+
+    // CHECK: %[[out:.+]] = linalg.lrelu_2d_nchw
+    // CHECK: ins(%[[conv]], %[[alpha]] :
+    // CHECK: outs(%[[conv]] :
+
+    // CHECK: return %[[out]]
+    return %result : tensor<1x1024x13x13xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @unfuse_conv_2d_tensor_add_lrelu(
+// CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x15x15xf32>
+// CHECK-SAME: %[[summand:.+]]: tensor<1x1024x13x13xf32>
+func.func @unfuse_conv_2d_tensor_add_lrelu(%ifm : tensor<1x1024x15x15xf32>, %summand : tensor<1x1024x13x13xf32>) -> tensor<1x1024x13x13xf32> {
+    %zero = arith.constant 0.0 : f32
+    // CHECK-DAG: %[[weights:.+]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
+    %weights = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
+    // CHECK-DAG: %[[bias:.+]] = arith.constant dense<3.000000e-01> : tensor<1024xf32>
+    %bias = arith.constant dense<3.000000e-01> : tensor<1024xf32>
+    // CHECK-DAG: %[[alpha:.+]] = arith.constant 2.000000e-02 : f32
+    %alpha = arith.constant 2.000000e-02 : f32
+
+    %init = tensor.splat %zero : tensor<1x1024x13x13xf32>
+    %result = linalg.conv_2d_tensor_add_lrelu
+        {dilation = dense<1> : tensor<2xi64>, stride = dense<1> : tensor<2xi64>}
+        ins(%ifm, %summand, %weights, %bias, %alpha : tensor<1x1024x15x15xf32>, tensor<1x1024x13x13xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>, f32)
+        outs(%init : tensor<1x1024x13x13xf32>)
+        -> tensor<1x1024x13x13xf32>
+
+    // CHECK: %[[preadd:.+]] = linalg.apply_bias_2d_fchw
+    // CHECK: ins(%[[summand]], %[[bias]] :
+
+    // CHECK: %[[conv:.+]] = linalg.conv_2d_nchw_fchw
+    // CHECK: ins(%[[ifm]], %[[weights]] :
+    // CHECK: outs(%[[preadd]] :
 
     // CHECK: %[[out:.+]] = linalg.lrelu_2d_nchw
     // CHECK: ins(%[[conv]], %[[alpha]] :
