@@ -2,7 +2,7 @@
 
 // CHECK-LABEL: func @unfuse_conv_2d_relu(
 // CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x17x17xf32>
-func @unfuse_conv_2d_relu(%ifm : tensor<1x1024x17x17xf32>) -> tensor<1x1024x7x7xf32> {
+func.func @unfuse_conv_2d_relu(%ifm : tensor<1x1024x17x17xf32>) -> tensor<1x1024x7x7xf32> {
     %zero = arith.constant 0.0 : f32
     // CHECK-DAG: %[[weights:.+]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
     %weights = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
@@ -36,7 +36,7 @@ func @unfuse_conv_2d_relu(%ifm : tensor<1x1024x17x17xf32>) -> tensor<1x1024x7x7x
 
 // CHECK-LABEL: func @unfuse_conv_2d_lrelu(
 // CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x15x15xf32>
-func @unfuse_conv_2d_lrelu(%ifm : tensor<1x1024x15x15xf32>) -> tensor<1x1024x13x13xf32> {
+func.func @unfuse_conv_2d_lrelu(%ifm : tensor<1x1024x15x15xf32>) -> tensor<1x1024x13x13xf32> {
     %zero = arith.constant 0.0 : f32
     // CHECK-DAG: %[[weights:.+]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
     %weights = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
@@ -72,7 +72,7 @@ func @unfuse_conv_2d_lrelu(%ifm : tensor<1x1024x15x15xf32>) -> tensor<1x1024x13x
 
 // CHECK-LABEL: func @unfuse_conv_2d_lrelu_maxpool(
 // CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x15x15xf32>
-func @unfuse_conv_2d_lrelu_maxpool(%ifm : tensor<1x1024x15x15xf32>) -> tensor<1x1024x7x7xf32> {
+func.func @unfuse_conv_2d_lrelu_maxpool(%ifm : tensor<1x1024x15x15xf32>) -> tensor<1x1024x7x7xf32> {
     %zero = arith.constant 0.0 : f32
     // CHECK-DAG: %[[weights:.+]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
     %weights = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
