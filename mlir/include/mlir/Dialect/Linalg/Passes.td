@@ -140,7 +140,8 @@ def LinalgUnfuse : Pass<"linalg-unfuse", "func::FuncOp"> {
   let dependentDialects = [
     "linalg::LinalgDialect", 
     "tensor::TensorDialect",
-    "arith::ArithmeticDialect"
+    "arith::ArithmeticDialect",
+    "math::MathDialect"
   ];
 }
 
