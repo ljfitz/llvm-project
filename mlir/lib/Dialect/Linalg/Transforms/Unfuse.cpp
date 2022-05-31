@@ -156,6 +156,34 @@ Value unfuse2DConvolution(
     }
 }
 
+struct Conv2DTensorAddLowering : OpRewritePattern<Conv2DTensorAddOp> {
+    using OpRewritePattern<Conv2DTensorAddOp>::OpRewritePattern;
+    LogicalResult matchAndRewrite(
+        Conv2DTensorAddOp op,
+        PatternRewriter &rewriter
+    ) const override
+    {
+        // Sanity check: number of operands, none are optional!
+        assert(op.getNumInputs() == 4 && "expected 4 inputs");
+        assert(op.getNumOutputs() == 1 && "expected 1 output");
+
+        // Unfuse the convolution and use the summand directly as destination.
+        rewriter.replaceOp(
+            op,
+            unfuse2DConvolution(
+                rewriter,
+                op,
+                /*ifm=*/op.getInputOperand(0)->get(),
+                /*weights=*/op.getInputOperand(2)->get(),
+                /*bias=*/op.getInputOperand(3)->get(),
+                /*dest=*/op.getInputOperand(1)->get()
+            )
+        );
+
+        return success();
+    }
+};
+
 struct Conv2DReluLowering : OpRewritePattern<Conv2DReluOp> {
     using OpRewritePattern<Conv2DReluOp>::OpRewritePattern;
     LogicalResult matchAndRewrite(
@@ -180,7 +208,40 @@ struct Conv2DReluLowering : OpRewritePattern<Conv2DReluOp> {
         // Unfuse the ReLU.
         rewriter.replaceOpWithNewOp<Relu2DNchwOp>(
             op,
-            /*resultTensorTypes=*/op.getOutputOperand(0)->get().getType(),
+            /*resultTensorTypes=*/convResult.getType(),
+            /*inputs=*/convResult,
+            /*outputs=*/convResult
+        );
+
+        return success();
+    }
+};
+
+struct Conv2DTensorAddReluLowering : OpRewritePattern<Conv2DTensorAddReluOp> {
+    using OpRewritePattern<Conv2DTensorAddReluOp>::OpRewritePattern;
+    LogicalResult matchAndRewrite(
+        Conv2DTensorAddReluOp op,
+        PatternRewriter &rewriter
+    ) const override
+    {
+        // Sanity check: number of operands, none are optional!
+        assert(op.getNumInputs() == 4 && "expected 4 inputs");
+        assert(op.getNumOutputs() == 1 && "expected 1 output");
+
+        // Unfuse the convolution and use the summand directly as destination.
+        auto convResult = unfuse2DConvolution(
+            rewriter,
+            op,
+            /*ifm=*/op.getInputOperand(0)->get(),
+            /*weights=*/op.getInputOperand(2)->get(),
+            /*bias=*/op.getInputOperand(3)->get(),
+            /*dest=*/op.getInputOperand(1)->get()
+        );
+
+        // Unfuse the ReLU.
+        rewriter.replaceOpWithNewOp<Relu2DNchwOp>(
+            op,
+            /*resultTensorTypes=*/convResult.getType(),
             /*inputs=*/convResult,
             /*outputs=*/convResult
         );
@@ -215,6 +276,45 @@ struct Conv2DLreluOpLowering : OpRewritePattern<Conv2DLreluOp> {
             Value inputs[] = {
                 /*ifm=*/convResult,
                 /*alpha=*/op.getInputOperand(3)->get()
+            };
+            rewriter.replaceOpWithNewOp<Lrelu2DNchwOp>(
+                op,
+                /*resultTensorTypes=*/convResult.getType(),
+                inputs,
+                /*outputs=*/convResult
+            );
+        }
+
+        return success();
+    }
+};
+
+struct Conv2DTensorAddLreluLowering : OpRewritePattern<Conv2DTensorAddLreluOp> {
+    using OpRewritePattern<Conv2DTensorAddLreluOp>::OpRewritePattern;
+    LogicalResult matchAndRewrite(
+        Conv2DTensorAddLreluOp op,
+        PatternRewriter &rewriter
+    ) const override
+    {
+        // Sanity check: number of operands, none are optional!
+        assert(op.getNumInputs() == 5 && "expected 5 inputs");
+        assert(op.getNumOutputs() == 1 && "expected 1 output");
+
+        // Unfuse the convolution and use the summand directly as destination.
+        auto convResult = unfuse2DConvolution(
+            rewriter,
+            op,
+            /*ifm=*/op.getInputOperand(0)->get(),
+            /*weights=*/op.getInputOperand(2)->get(),
+            /*bias=*/op.getInputOperand(3)->get(),
+            /*dest=*/op.getInputOperand(1)->get()
+        );
+
+        // Unfuse the leaky ReLU.
+        {
+            Value inputs[] = {
+                /*ifm=*/convResult,
+                /*alpha=*/op.getInputOperand(4)->get()
             };
             rewriter.replaceOpWithNewOp<Lrelu2DNchwOp>(
                 op,
@@ -271,7 +371,6 @@ struct Conv2DLreluMaxpoolOpLowering : OpRewritePattern<Conv2DLreluMaxpoolOp> {
             .getElementType();
         if (llvm::any_of(padding, [](auto x) { return x != 0; })) {
             // Create the tensor.pad op.
-            // TODO: Check the padding order.
             int64_t padLow[] = { 0, 0, padding[2], padding[0] };
             int64_t padHigh[] = { 0, 0, padding[3], padding[1] };
             auto padOp = rewriter.create<tensor::PadOp>(
@@ -357,8 +456,11 @@ struct LinalgUnfusePass
         // BUG: Utterly fails for dynamic dimensions. Maybe reject patterns?
 
         patterns.add<
+            Conv2DTensorAddLowering,
             Conv2DReluLowering,
+            Conv2DTensorAddReluLowering,
             Conv2DLreluOpLowering,
+            Conv2DTensorAddLreluLowering,
             Conv2DLreluMaxpoolOpLowering
         >(&getContext());
 
