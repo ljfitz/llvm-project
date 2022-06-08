@@ -33,6 +33,7 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -678,6 +679,163 @@ LogicalResult SoftmaxOp::verify() {
   if (dimS >= inputTensor.getRank() || dimS < -inputTensor.getRank())
     return emitOpError("dim must be in range [-inputRank, inputRank)");
   return success();
+}
+
+//===----------------------------------------------------------------------===//
+// FusedOp
+//===----------------------------------------------------------------------===//
+
+void FusedOp::print(OpAsmPrinter &p) {
+  // (%arg0 = %capture0 : type, ...)
+  p << '(';
+  llvm::interleaveComma(llvm::zip(getCaptureArgs(), captures()), p, [&](auto it) {
+    p << std::get<0>(it) << " = " << std::get<1>(it) << " : ";
+    p.printType(std::get<1>(it).getType());
+  });
+  p << ") ";
+
+  // attr-dict-with-keyword
+  auto attrs = static_cast<Operation*>(*this)->getAttrs();
+  p.printOptionalAttrDictWithKeyword(attrs);
+  if (!attrs.empty())
+    p << ' ';
+
+  // { ... }
+  p.printRegion(getBodyRegion(), false);
+
+  // -> type
+  if (result()) {
+    p << " -> ";
+    p.printType(result().getType());
+  };
+}
+
+ParseResult FusedOp::parse(OpAsmParser &p, OperationState &state) {
+  SmallVector<OpAsmParser::UnresolvedOperand> captures;
+  SmallVector<Type> captureTypes;
+  SmallVector<OpAsmParser::UnresolvedOperand> captureArgs;
+
+  // (%arg0 = %capture0 : type, ...)
+  if (p.parseAssignmentListWithTypes(captureArgs, captures, captureTypes))
+    return failure();
+  if (p.resolveOperands(captures, captureTypes, p.getNameLoc(), state.operands))
+    return failure();
+
+  // attr-dict-with-keyword
+  if (p.parseOptionalAttrDictWithKeyword(state.attributes))
+    return failure();
+
+  // { ... }
+  if (p.parseRegion(
+      *state.addRegion(),
+      captureArgs,
+      captureTypes,
+      ArrayRef<Location>{},
+      true))
+    return failure();
+
+  // -> type
+  if (succeeded(p.parseOptionalArrow())) {
+    if (p.parseType(state.types.emplace_back()))
+      return failure();
+  }
+
+  return success();
+}
+
+LogicalResult FusedOp::verify() {
+  // NOTE: SingleBlockImplicitTerminator already verified that:
+  //       - there's a single block.
+  //       - it's terminated by YieldOp.
+  auto yield = cast<YieldOp>(getBody()->getTerminator());
+
+  // Check that the yield matches the result declaration.
+  if (yield.getNumOperands() != (result() ? 1 : 0))
+    return emitOpError("number of yield operands (")
+        << yield.getNumOperands() << ") does not match number of results ("
+        << (result() ? 1 : 0) << ")";
+  if (result()) {
+    if (yield.getOperand(0).getType() != result().getType())
+      return emitOpError("type of yield operand ")
+          << yield.getOperand(0).getType()
+          << " does not match result type " << result().getType();
+  }
+
+  return success();
+}
+
+using MemoryEffect = SideEffects::EffectInstance<MemoryEffects::Effect>;
+
+void FusedOp::getEffects(SmallVectorImpl<MemoryEffect> &effects) {
+  struct ArgEffect {
+    /*implicit*/ ArgEffect(Value capture) : capture(capture), effects() {}
+
+    Value capture;
+    SmallPtrSet<MemoryEffects::Effect*, 4> effects;
+  };
+
+  // Preprare to collect side-effects for all captured arguments.
+  DenseMap<Value, ArgEffect> argEffects;
+  for (auto idx = 0UL; idx < getBody()->getNumArguments(); ++idx) {
+    argEffects.try_emplace(getBody()->getArgument(idx), captures()[idx]);
+  }
+
+  // Collect all side-effects on captured arguments.
+  for (auto& op : *getBody()) {
+    auto sideEffectInterface = dyn_cast<MemoryEffectOpInterface>(op);
+    if (!sideEffectInterface)
+      continue;
+
+    SmallVector<MemoryEffect> sideEffects;
+    sideEffectInterface.getEffects(sideEffects);
+    for (auto& sideEffect : sideEffects) {
+      auto it = argEffects.find(sideEffect.getValue());
+      if (it != argEffects.end()) {
+        it->getSecond().effects.insert(sideEffect.getEffect());
+      }
+    }
+  }
+
+  // Emit all these side-effects remapped to the captured arguments.
+  effects.clear();
+  for (auto& pair : argEffects) {
+    for (auto effect : pair.getSecond().effects) {
+      effects.emplace_back(
+          effect,
+          pair.getSecond().capture,
+          SideEffects::DefaultResource::get());
+    }
+  }
+}
+
+OperandRange FusedOp::getSuccessorEntryOperands(unsigned index) {
+  assert(index == 0 && "invalid region index");
+
+  // The body takes the captured values.
+  return captures();
+}
+
+void FusedOp::getSuccessorRegions(
+    Optional<unsigned> index,
+    ArrayRef<Attribute> operands,
+    SmallVectorImpl<RegionSuccessor> &regions) {
+  if (index.hasValue()) {
+    assert(index.getValue() == 0 && "invalid region index");
+
+    // The body branches back to the parent.
+    regions.push_back(RegionSuccessor(getResults()));
+    return;
+  }
+
+  // The entry branches to the body.
+  regions.push_back(RegionSuccessor(&getBodyRegion(), getCaptureArgs()));
+}
+
+void FusedOp::getRegionInvocationBounds(
+    ArrayRef<Attribute> operands,
+    SmallVectorImpl<InvocationBounds> &invocationBounds) {
+  // The body is executed exactly once.
+  invocationBounds.assign(1, {1, 1});
 }
 
 //===----------------------------------------------------------------------===//
@@ -1531,6 +1689,11 @@ LogicalResult linalg::YieldOp::verify() {
 
   if (auto linalgOp = dyn_cast<LinalgOp>(parentOp))
     return verifyYield(*this, linalgOp);
+
+  if (auto fusedOp = dyn_cast<FusedOp>(parentOp)) {
+    // We perform this verification in the FusedOp.
+    return success();
+  }
 
   return emitOpError("expected parent op with LinalgOp interface");
 }
