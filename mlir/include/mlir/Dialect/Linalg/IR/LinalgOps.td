@@ -203,4 +203,52 @@ def Linalg_SoftmaxOp : Linalg_Op<"softmax", [NoSideEffect]> {
   let hasVerifier = 1;
 }
 
+def Linalg_FusedOp
+    : Linalg_Op<"fused", [
+        IsolatedFromAbove,
+        DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+        DeclareOpInterfaceMethods<
+          RegionBranchOpInterface, [
+            "getSuccessorEntryOperands",
+            "getNumRegionInvocations",
+            "getRegionInvocationBounds"]>,
+        SingleBlockImplicitTerminator<"YieldOp">]> {
+  let summary = "Fused operator region";
+  let description = [{
+    The `linalg.fused` operation declares a single block that collects
+    operations that produce a tensor value in a single fused loop nest, with
+    all intermediary values being buffered internally and/or scalar replaced.
+
+    All values used within this block must be explicitly captured.
+
+    This operation also supports buffered semantics, where no value will be
+    returned, and all side-effects are expected to be mediated through captured
+    memrefs.
+
+    Example:
+
+    ```mlir
+    %0 = ... : tensor<1x3x108x108xf32>
+    %1 = linalg.fused (%ifm = %0 : tensor<1x3x108x108xf32>) {
+      %0 = linalg.conv2d_nchw ins(%ifm: ...
+      %1 = linalg.relu2d_nchw ins(%0: ...
+      linalg.yield %1 : tensor<1x3x106x106xf32>
+    } -> tensor<1x3x106x106xf32>
+    ```
+  }];
+
+  let arguments = (ins Variadic<AnyType>:$captures);
+  let results = (outs Optional<AnyRankedTensor>:$result);
+  let regions = (region AnyRegion:$body);
+
+  let hasCustomAssemblyFormat = 1;
+  let hasVerifier = 1;
+
+  code extraClassDeclaration = [{
+    Block::BlockArgListType getCaptureArgs() {
+      return getBody()->getArguments();
+    }
+  }];
+}
+
 #endif // LINALG_OPS
