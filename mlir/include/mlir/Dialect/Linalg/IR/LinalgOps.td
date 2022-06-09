@@ -239,14 +239,34 @@ def Linalg_FusedOp
 
   let arguments = (ins Variadic<AnyType>:$captures);
   let results = (outs Optional<AnyRankedTensor>:$result);
-  let regions = (region AnyRegion:$body);
+  let regions = (region SizedRegion<1>:$body);
 
   let hasCustomAssemblyFormat = 1;
   let hasVerifier = 1;
+  let hasCanonicalizer = 1;
+
+  let builders = [
+    OpBuilder<(ins
+      "Type":$resultType,
+      "ValueRange":$captures,
+      CArg<"function_ref<void(OpBuilder &, Location, ValueRange)>", "nullptr">:$bodyBuilder)>,
+    OpBuilder<(ins
+      "ValueRange":$captures,
+      CArg<"function_ref<void(OpBuilder &, Location, ValueRange)>", "nullptr">:$bodyBuilder)>
+  ];
+  let skipDefaultBuilders = 1;
 
   code extraClassDeclaration = [{
     Block::BlockArgListType getCaptureArgs() {
       return getBody()->getArguments();
+    }
+
+    BlockAndValueMapping getCaptureMapping() {
+      BlockAndValueMapping result;
+      for (unsigned idx = 0; idx < captures().size(); ++idx) {
+        result.map(captures()[idx], getCaptureArgs()[idx]);
+      }
+      return result;
     }
   }];
 }

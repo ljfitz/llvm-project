@@ -744,24 +744,167 @@ ParseResult FusedOp::parse(OpAsmParser &p, OperationState &state) {
 }
 
 LogicalResult FusedOp::verify() {
-  // NOTE: SingleBlockImplicitTerminator already verified that:
+  // NOTE: SizedRegion<1> already verifie that:
   //       - there's a single block.
+  // NOTE: SingleBlockImplicitTerminator already verified that:
   //       - it's terminated by YieldOp.
+
+  if (!llvm::equal(
+      llvm::map_range(captures(), [](auto x) { return x.getType(); }),
+      llvm::map_range(getCaptureArgs(), [](auto x) { return x.getType(); })))
+    return emitOpError("block arguments do not match capture arguments");
+
+  // NOTE: Because we don't implement the LinalgOp interface, we need to do this
+  //       ourselves.
+
   auto yield = cast<YieldOp>(getBody()->getTerminator());
 
   // Check that the yield matches the result declaration.
   if (yield.getNumOperands() != (result() ? 1 : 0))
-    return emitOpError("number of yield operands (")
+    return yield.emitOpError("number of yield operands (")
         << yield.getNumOperands() << ") does not match number of results ("
         << (result() ? 1 : 0) << ")";
   if (result()) {
     if (yield.getOperand(0).getType() != result().getType())
-      return emitOpError("type of yield operand ")
+      return yield.emitOpError("type of yield operand (")
           << yield.getOperand(0).getType()
-          << " does not match result type " << result().getType();
+          << ") does not match result type (" << result().getType() << ")";
   }
 
   return success();
+}
+
+using BodyBuilder = void(OpBuilder &, Location, ValueRange);
+
+void FusedOp::build(
+    OpBuilder &builder,
+    OperationState &state,
+    Type resultType,
+    ValueRange captures,
+    function_ref<BodyBuilder> bodyBuilder) {
+  if (resultType)
+    state.types.push_back(resultType);
+
+  state.addOperands(captures);
+
+  auto region = state.addRegion();
+
+  if (!bodyBuilder)
+    return;
+
+  OpBuilder::InsertionGuard guard(builder);
+
+  auto captureTypes = llvm::to_vector(
+      llvm::map_range(captures, [](auto x) { return x.getType(); }));
+  auto captureLocs = llvm::to_vector(
+      llvm::map_range(captures, [](auto x) { return x.getLoc(); }));
+  auto body = builder.createBlock(
+      region,
+      region->end(),
+      captureTypes,
+      captureLocs);
+  bodyBuilder(builder, state.location, body->getArguments());
+}
+
+void FusedOp::build(
+    OpBuilder &builder,
+    OperationState &state,
+    ValueRange captures,
+    function_ref<BodyBuilder> bodyBuilder) {
+  build(builder, state, Type{}, captures, bodyBuilder);
+}
+
+namespace {
+
+struct DropUnusedCaptures : OpRewritePattern<FusedOp> {
+  using OpRewritePattern<FusedOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      FusedOp op,
+      PatternRewriter &rewriter) const override {
+    // Compute a pruned mapping of captures values to actually used arguments.
+    BlockAndValueMapping prunedMapping, removedArgs;
+    for (unsigned idx = 0; idx < op.captures().size(); ++idx) {
+      auto arg = op.getCaptureArgs()[idx];
+      if (arg.getUses().empty()) {
+        removedArgs.map(arg, Value{});
+        continue;
+      }
+      prunedMapping.map(op.captures()[idx], arg);
+    }
+
+    if (removedArgs.getValueMap().empty()) {
+      // No captures can be removed.
+      return failure();
+    }
+
+    // Replace this op with a new op that only has the pruned captures.
+    auto prunedCaptures = llvm::to_vector(llvm::map_range(
+      prunedMapping.getValueMap(), [](auto& x) { return x.getFirst(); }));
+    rewriter.setInsertionPoint(op);
+    auto prunedOp = rewriter.create<FusedOp>(
+      op.getLoc(),
+      op.result() ? op.result().getType() : Type{},
+      prunedCaptures);
+    op.body().cloneInto(&prunedOp.getBodyRegion(), removedArgs);
+    rewriter.replaceOp(op, prunedOp.getResults());
+
+    return success();
+  }
+};
+
+struct DropUnusedResult : OpRewritePattern<FusedOp> {
+  using OpRewritePattern<FusedOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      FusedOp op,
+      PatternRewriter &rewriter) const override {
+    if (!op.result() || !op.result().getUses().empty())
+      return failure();
+
+    // Replace this op with a new op that does not have any results.
+    auto newOp = rewriter.create<FusedOp>(
+      op.getLoc(),
+      op.captures());
+    BlockAndValueMapping removedArgs;
+    op.body().cloneInto(&newOp.getBodyRegion(), removedArgs);
+    rewriter.setInsertionPointToEnd(newOp.getBody());
+    rewriter.replaceOpWithNewOp<YieldOp>(newOp.getBody()->getTerminator());
+    rewriter.eraseOp(op);
+
+    return success();
+  }
+};
+
+struct EraseEmptyFusedOp : OpRewritePattern<FusedOp> {
+  using OpRewritePattern<FusedOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      FusedOp op,
+      PatternRewriter &rewriter) const override {
+    auto terminator = op.getBody()->getTerminator();
+    if (terminator != &op.getBody()->front())
+      return failure();
+
+    if (terminator->getNumOperands() == 0) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+
+    auto capture = llvm::find(op.getCaptureArgs(), terminator->getOperand(0));
+    assert(capture != op.getCaptureArgs().end());
+    rewriter.replaceOp(op, op.captures()[capture->getArgNumber()]);
+
+    return success();
+  }
+};
+
+} // namespace <anonymous>
+
+void FusedOp::getCanonicalizationPatterns(
+    RewritePatternSet &results,
+    MLIRContext *context) {
+  results.add<DropUnusedCaptures, DropUnusedResult, EraseEmptyFusedOp>(context);
 }
 
 using MemoryEffect = SideEffects::EffectInstance<MemoryEffects::Effect>;
@@ -781,14 +924,14 @@ void FusedOp::getEffects(SmallVectorImpl<MemoryEffect> &effects) {
   }
 
   // Collect all side-effects on captured arguments.
-  for (auto& op : *getBody()) {
+  for (auto &op : *getBody()) {
     auto sideEffectInterface = dyn_cast<MemoryEffectOpInterface>(op);
     if (!sideEffectInterface)
       continue;
 
     SmallVector<MemoryEffect> sideEffects;
     sideEffectInterface.getEffects(sideEffects);
-    for (auto& sideEffect : sideEffects) {
+    for (auto &sideEffect : sideEffects) {
       auto it = argEffects.find(sideEffect.getValue());
       if (it != argEffects.end()) {
         it->getSecond().effects.insert(sideEffect.getEffect());
@@ -798,7 +941,7 @@ void FusedOp::getEffects(SmallVectorImpl<MemoryEffect> &effects) {
 
   // Emit all these side-effects remapped to the captured arguments.
   effects.clear();
-  for (auto& pair : argEffects) {
+  for (auto &pair : argEffects) {
     for (auto effect : pair.getSecond().effects) {
       effects.emplace_back(
           effect,
