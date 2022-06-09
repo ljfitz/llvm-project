@@ -23,12 +23,12 @@ func.func @unfuse_conv_2d_tensor_add(%ifm : tensor<1x1024x10x10xf32>, %summand :
     // CHECK: %[[out:.+]] = linalg.conv_2d_nchw_fchw
     // CHECK: ins(%[[ifm]], %[[weights]] :
     // CHECK: outs(%[[preadd]] :
-    
+
     // CHECK: return %[[out]]
     return %result : tensor<1x1024x8x8xf32>
 }
 
-// ----
+// -----
 
 // CHECK-LABEL: func @unfuse_conv_2d_relu(
 // CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x17x17xf32>
@@ -62,7 +62,7 @@ func.func @unfuse_conv_2d_relu(%ifm : tensor<1x1024x17x17xf32>) -> tensor<1x1024
     return %result : tensor<1x1024x7x7xf32>
 }
 
-// ----
+// -----
 
 // CHECK-LABEL: func @unfuse_conv_2d_tensor_add_relu(
 // CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x17x17xf32>
