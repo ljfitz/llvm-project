@@ -138,10 +138,20 @@ def LinalgUnfuse : Pass<"linalg-unfuse", "func::FuncOp"> {
   let summary = "Convert fused named ops into simple ops";
   let constructor = "mlir::createLinalgUnfusePass()";
   let dependentDialects = [
-    "linalg::LinalgDialect", 
+    "linalg::LinalgDialect",
     "tensor::TensorDialect",
     "arith::ArithmeticDialect",
     "math::MathDialect"
+  ];
+}
+
+def LinalgStructuralFusion : Pass<"linalg-structural-fusion", "func::FuncOp"> {
+  let summary = "Performs structural fusion based on the linalg.fused op";
+  let constructor = "mlir::createLinalgStructuralFusionPass()";
+  let dependentDialects = [
+    "linalg::LinalgDialect",
+    "tensor::TensorDialect",
+    "arith::ArithmeticDialect"
   ];
 }
 
