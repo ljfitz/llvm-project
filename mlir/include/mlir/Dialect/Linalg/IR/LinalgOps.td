@@ -207,6 +207,7 @@ def Linalg_FusedOp
     : Linalg_Op<"fused", [
         IsolatedFromAbove,
         DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+        DeclareOpInterfaceMethods<LinalgOperatorClassInterface>,
         DeclareOpInterfaceMethods<
           RegionBranchOpInterface, [
             "getSuccessorEntryOperands",

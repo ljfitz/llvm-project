@@ -28,10 +28,6 @@
 namespace mlir {
 namespace linalg {
 
-/// Returns a singelton FallbackModel for the OperatorClassInterface.
-///
-/// This FallbackModel is attached to all linalg dialect operations so that we
-/// don't have to change their definitions.
 void* getOperatorClassInterfaceFallback();
 
 class LinalgOp;

@@ -54,8 +54,6 @@ FailureOr<OperatorClass> parseOperatorClass(StringRef str);
 
 raw_ostream& operator<<(raw_ostream &os, OperatorClass value);
 
-OperatorClass classifyOperator(Operation *op);
-
 class LinalgOp;
 
 /// OpOperand vector that implicitly converts to a Value vector.

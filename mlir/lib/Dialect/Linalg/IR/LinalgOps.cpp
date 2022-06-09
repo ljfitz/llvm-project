@@ -907,6 +907,16 @@ void FusedOp::getCanonicalizationPatterns(
   results.add<DropUnusedCaptures, DropUnusedResult, EraseEmptyFusedOp>(context);
 }
 
+OperatorClass FusedOp::getOperatorClass() {
+  using llvm::operator|=;
+  auto result = OperatorClass::None;
+  for (auto &op : *getBody()) {
+    if (auto iface = dyn_cast<OperatorClassInterface>(op))
+      result |= iface.getOperatorClass();
+  }
+  return result;
+}
+
 using MemoryEffect = SideEffects::EffectInstance<MemoryEffects::Effect>;
 
 void FusedOp::getEffects(SmallVectorImpl<MemoryEffect> &effects) {
@@ -2265,18 +2275,19 @@ struct OperatorClassInterfaceFallback
 
     if (mlir::detail::isConstantLike(op) || isa<InitTensorOp>(op))
       return OperatorClass::Constant;
-    if (isa<ApplyBias2DFchwOp, tensor::SplatOp, linalg::BroadcastBias2DFchwOp,
-            linalg::FillOp>(op))
+    if (isa<ApplyBias2DFchwOp, tensor::SplatOp>(op))
       return OperatorClass::Broadcast;
     if (isa<Relu2DNchwOp, Lrelu2DNchwOp>(op))
       return OperatorClass::Activation;
-    if (isa<tensor::PadOp>(op))
+    if (isa<tensor::PadOp, tensor::SplatOp, linalg::FillOp>(op))
       return OperatorClass::Padding;
     if (isa<Conv2DReluOp, Conv2DLreluOp>(op))
       return OperatorClass::Convolution | OperatorClass::Activation;
     if (isa<Conv2DLreluMaxpoolOp>(op))
-      return OperatorClass::Convolution | OperatorClass::Activation |
-             OperatorClass::Padding | OperatorClass::Pooling;
+      return OperatorClass::Convolution
+          | OperatorClass::Activation
+          | OperatorClass::Padding
+          | OperatorClass::Pooling;
 
     //
     // Guessing
@@ -2306,19 +2317,11 @@ struct OperatorClassInterfaceFallback
   }
 };
 
-} // namespace
-
-OperatorClass mlir::linalg::classifyOperator(Operation *op) {
-  if (auto iface = dyn_cast<OperatorClassInterface>(op)) {
-    return iface.getOperatorClass();
-  }
-
-  return OperatorClassInterfaceFallback().getOperatorClass(op);
-}
+} // namespace <anonymous>
 
 void *mlir::linalg::getOperatorClassInterfaceFallback() {
   static OperatorClassInterfaceFallback instance;
-  return static_cast<void *>(&instance);
+  return static_cast<void*>(&instance);
 }
 
 //===----------------------------------------------------------------------===//
