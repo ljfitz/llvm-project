@@ -14,6 +14,7 @@
 #define LINALG_OPS
 
 include "mlir/Dialect/Linalg/IR/LinalgBase.td"
+include "mlir/Dialect/Linalg/IR/LinalgInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
 include "mlir/Interfaces/LoopLikeInterface.td"
@@ -206,6 +207,7 @@ def Linalg_FusedOp
     : Linalg_Op<"fused", [
         IsolatedFromAbove,
         DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+        DeclareOpInterfaceMethods<LinalgOperatorClassInterface>,
         DeclareOpInterfaceMethods<
           RegionBranchOpInterface, [
             "getSuccessorEntryOperands",

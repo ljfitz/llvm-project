@@ -28,6 +28,8 @@
 namespace mlir {
 namespace linalg {
 
+void* getOperatorClassInterfaceFallback();
+
 class LinalgOp;
 
 // TOFO: allow an extra ValueRange to specify an indexing and allow
