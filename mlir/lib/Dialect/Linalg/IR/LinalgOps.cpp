@@ -774,7 +774,7 @@ LogicalResult FusedOp::verify() {
   return success();
 }
 
-using BodyBuilder = void(OpBuilder &, Location, ValueRange);
+using BodyBuilder = void(OpBuilder &, Location, BlockAndValueMapping &);
 
 void FusedOp::build(
     OpBuilder &builder,
@@ -803,7 +803,12 @@ void FusedOp::build(
       region->end(),
       captureTypes,
       captureLocs);
-  bodyBuilder(builder, state.location, body->getArguments());
+
+  BlockAndValueMapping captureMapping;
+  for (unsigned idx = 0; idx < captures.size(); ++idx) {
+    captureMapping.map(state.operands[idx], body->getArgument(idx));
+  }
+  bodyBuilder(builder, state.location, captureMapping);
 }
 
 void FusedOp::build(
@@ -2318,6 +2323,14 @@ struct OperatorClassInterfaceFallback
 };
 
 } // namespace <anonymous>
+
+OperatorClass mlir::linalg::classifyOperator(Operation *op) {
+  if (auto iface = dyn_cast<OperatorClassInterface>(op)) {
+    return iface.getOperatorClass();
+  }
+
+  return OperatorClassInterfaceFallback().getOperatorClass(op);
+}
 
 void *mlir::linalg::getOperatorClassInterfaceFallback() {
   static OperatorClassInterfaceFallback instance;

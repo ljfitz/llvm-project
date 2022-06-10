@@ -153,6 +153,10 @@ def LinalgStructuralFusion : Pass<"linalg-structural-fusion", "func::FuncOp"> {
     "tensor::TensorDialect",
     "arith::ArithmeticDialect"
   ];
+  let options = [
+    ListOption<"strategyString", "strategy", "std::string",
+               "Declarative fusion strategy string.", "llvm::cl::ZeroOrMore">
+  ];
 }
 
 def LinalgDetensorize : Pass<"linalg-detensorize", ""> {

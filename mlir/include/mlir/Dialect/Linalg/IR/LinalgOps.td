@@ -250,10 +250,10 @@ def Linalg_FusedOp
     OpBuilder<(ins
       "Type":$resultType,
       "ValueRange":$captures,
-      CArg<"function_ref<void(OpBuilder &, Location, ValueRange)>", "nullptr">:$bodyBuilder)>,
+      CArg<"function_ref<void(OpBuilder &, Location, BlockAndValueMapping &)>", "nullptr">:$bodyBuilder)>,
     OpBuilder<(ins
       "ValueRange":$captures,
-      CArg<"function_ref<void(OpBuilder &, Location, ValueRange)>", "nullptr">:$bodyBuilder)>
+      CArg<"function_ref<void(OpBuilder &, Location, BlockAndValueMapping &)>", "nullptr">:$bodyBuilder)>
   ];
   let skipDefaultBuilders = 1;
 
@@ -266,6 +266,13 @@ def Linalg_FusedOp
       BlockAndValueMapping result;
       for (unsigned idx = 0; idx < captures().size(); ++idx) {
         result.map(captures()[idx], getCaptureArgs()[idx]);
+      }
+      return result;
+    }
+    BlockAndValueMapping getUnCaptureMapping() {
+      BlockAndValueMapping result;
+      for (unsigned idx = 0; idx < captures().size(); ++idx) {
+        result.map(getCaptureArgs()[idx], captures()[idx]);
       }
       return result;
     }
