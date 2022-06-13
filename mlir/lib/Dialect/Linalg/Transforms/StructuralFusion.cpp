@@ -59,6 +59,32 @@ static bool canWrapInFusedOp(Operation *target) {
   }
 }
 
+static void collectUses(Operation *root, Operation *op, SmallVectorImpl<Value> &uses) {
+  const auto isLocal = [&](Value value) {
+    auto source = value.getDefiningOp();
+    if (auto barg = value.dyn_cast<BlockArgument>())
+      source = barg.getOwner()->getParentOp();
+    while (source) {
+      if (source == root) return true;
+      source = source->getParentOp();
+    }
+    return false;
+  };
+  const auto unite = [&](Value operand) {
+    if (isLocal(operand)) return;
+    if (llvm::find(uses, operand) != uses.end()) return;
+    uses.push_back(operand);
+  };
+
+  llvm::for_each(op->getOperands(), unite);
+
+  for (auto &region : op->getRegions()) {
+    for (auto &op : region.getOps()) {
+      collectUses(root, &op, uses);
+    }
+  }
+}
+
 /// Wraps @p target in a `linalg.fused` operation.
 ///
 /// See canWrapInFusedOp() on what scenarios this transformation is allowed in.
@@ -80,6 +106,9 @@ static bool canWrapInFusedOp(Operation *target) {
 static FusedOp wrapInFusedOp(Operation *target) {
   assert(canWrapInFusedOp(target));
 
+  SmallVector<Value> captures;
+  collectUses(target, target, captures);
+
   // Create the FusedOp.
   OpBuilder builder(target);
   auto fusedOp = builder.create<FusedOp>(
@@ -87,7 +116,7 @@ static FusedOp wrapInFusedOp(Operation *target) {
       /*resulType=*/target->getNumResults()
           ? target->getResult(0).getType()
           : Type{},
-      /*captures=*/target->getOperands(),
+      /*captures=*/captures,
       [=](OpBuilder &builder, Location loc, BlockAndValueMapping &captures) {
         // Clone the target op into the FusedOp.
         auto clonedOp = builder.insert(target->clone(captures));
@@ -225,12 +254,7 @@ static FusedOp fuseProducer(FusedOp target, Operation *producer) {
   }
 
   // Ensure all operands to producer are captured.
-  for (auto operand : producer->getOperands()) {
-    if (llvm::find(newCaptures, operand) != newCaptures.end())
-      continue;
-
-    newCaptures.push_back(operand);
-  }
+  collectUses(producer, producer, newCaptures);
 
   // Create the new FusedOp.
   OpBuilder builder(target);
@@ -251,7 +275,6 @@ static FusedOp fuseProducer(FusedOp target, Operation *producer) {
 
         // Update the capture mapping with results of the prepended op.
         for (auto &pair : argToResultIdx) {
-          llvm::errs() << pair.getFirst() << " = " << pair.getSecond();
           captures.map(pair.getFirst(), prepended->getResult(pair.getSecond()));
         }
 
@@ -317,17 +340,13 @@ static FusedOp fuseConsumer(FusedOp target, Operation *consumer) {
 
   // Ensure that all operands of consumer are captured.
   auto newCaptures = llvm::to_vector(target.captures());
-  for (auto operand : consumer->getOperands()) {
-    if (operand == target.result())
-      continue;
-    if (llvm::find(newCaptures, operand) != newCaptures.end())
-      continue;
-
-    newCaptures.push_back(operand);
-  }
+  collectUses(consumer, consumer, newCaptures);
+  llvm::erase_if(
+      newCaptures,
+      [&](Value capture) { return capture == target.result(); });
 
   // Create the new FusedOp.
-  OpBuilder builder(target);
+  OpBuilder builder(consumer);
   auto result = builder.create<FusedOp>(
       target.getLoc(),
       /*resultType=*/consumer->getNumResults()
