@@ -60,7 +60,7 @@ def conv_2d_lrelu(
 
 @linalg_structured_op
 def conv_2d_lrelu_maxpool(
-    I=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
+    I=TensorDef(T1, S.N, S.C, S.OH * S.SH * S.MSH + S.KH * S.DH, S.OW * S.SW * S.MSW + S.KW * S.DW),
     K=TensorDef(T2, S.F, S.C, S.KH, S.KW),
     B=TensorDef(T3, S.F),
     alpha=ScalarDef(F32),
@@ -82,7 +82,7 @@ def conv_2d_lrelu_maxpool(
   implements(ConvolutionOpInterface)
   domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw)
   O[D.n, D.f, D.oh, D.ow] += alpha * (TypeFn.cast_signed(U, B[D.f]) + TypeFn.cast_signed(
-      U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH, D.ow * S.SW + D.kw * S.DW
+      U, I[D.n, D.c, D.oh * S.SH * S.MSH  + D.kh * S.DH, D.ow * S.SW * S.MSW + D.kw * S.DW
            ]) * TypeFn.cast_signed(U, K[D.f, D.c, D.kh, D.kw]))
 
 @linalg_structured_op
