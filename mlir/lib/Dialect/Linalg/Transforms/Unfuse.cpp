@@ -144,8 +144,8 @@ Value unfuse2DConvolution(
     {
         Value inputs[] = { /*I=*/ifm, /*K=*/weights };
         NamedAttribute attributes[] = {
-            builder.getNamedAttr("dilation", dilationAttr),
-            builder.getNamedAttr("stride", strideAttr)
+            builder.getNamedAttr("dilations", dilationAttr),
+            builder.getNamedAttr("strides", strideAttr)
         };
         return builder.create<Conv2DNchwFchwOp>(
             op->getLoc(),
@@ -432,8 +432,8 @@ struct Conv2DLreluMaxpoolOpLowering : OpRewritePattern<Conv2DLreluMaxpoolOp> {
                 )
             };
             NamedAttribute attributes[] = {
-                rewriter.getNamedAttr("dilation", op->getAttr("mp_dilation")),
-                rewriter.getNamedAttr("stride", op->getAttr("mp_stride"))
+                rewriter.getNamedAttr("dilations", op->getAttr("mp_dilation")),
+                rewriter.getNamedAttr("strides", op->getAttr("mp_stride"))
             };
             rewriter.replaceOpWithNewOp<PoolingNchwMaxOp>(
                 op,
