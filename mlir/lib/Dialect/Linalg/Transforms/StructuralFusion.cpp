@@ -469,7 +469,29 @@ struct LinalgStructuralFusionPass
 
         strategy = std::move(parsed.getValue());
       } else {
-        // TODO: Default strategy.
+        static Strategy defaultStrategy;
+        if (defaultStrategy.empty()) {
+          defaultStrategy.push_back(
+            Tactic{Tactic::Method::Seed, OperatorClass::Convolution}
+          );
+          defaultStrategy.push_back(
+            Tactic{Tactic::Method::FuseConsumers, OperatorClass::Activation}
+          );
+          defaultStrategy.push_back(
+            Tactic{Tactic::Method::Dissolve, OperatorClass{}}
+          );
+          defaultStrategy.push_back(
+            Tactic{Tactic::Method::FuseProducers, OperatorClass::Broadcast}
+          );
+          defaultStrategy.push_back(
+            Tactic{Tactic::Method::FuseConsumers, OperatorClass::Padding}
+          );
+          defaultStrategy.push_back(
+            Tactic{Tactic::Method::FuseConsumers, OperatorClass::Pooling}
+          );
+        }
+
+        strategy = defaultStrategy;
       }
     }
 

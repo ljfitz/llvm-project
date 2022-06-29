@@ -155,7 +155,13 @@ def LinalgStructuralFusion : Pass<"linalg-structural-fusion", "func::FuncOp"> {
   ];
   let options = [
     ListOption<"strategyString", "strategy", "std::string",
-               "Declarative fusion strategy string.", "llvm::cl::ZeroOrMore">
+               "Declarative fusion strategy string."
+               "The format accepts a comma-separated list of tactics among "
+               "seed,producers,producers*,consumers,consumers*,dissolve "
+               "plus a filter in parens, which can take set of any of the "
+               "categories const,generic,el,act,conv,pool,pad,bcast "
+               "e.g. seed(conv),consumers(act),dissolve",
+               "llvm::cl::ZeroOrMore">
   ];
 }
 
