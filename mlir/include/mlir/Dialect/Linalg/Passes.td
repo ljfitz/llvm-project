@@ -210,10 +210,30 @@ def LinalgUnfuse : Pass<"linalg-unfuse", "func::FuncOp"> {
   let summary = "Convert fused named ops into simple ops";
   let constructor = "mlir::createLinalgUnfusePass()";
   let dependentDialects = [
-    "linalg::LinalgDialect", 
+    "linalg::LinalgDialect",
     "tensor::TensorDialect",
     "arith::ArithmeticDialect",
     "math::MathDialect"
+  ];
+}
+
+def LinalgStructuralFusion : Pass<"linalg-structural-fusion", "func::FuncOp"> {
+  let summary = "Performs structural fusion based on the linalg.fused op";
+  let constructor = "mlir::createLinalgStructuralFusionPass()";
+  let dependentDialects = [
+    "linalg::LinalgDialect",
+    "tensor::TensorDialect",
+    "arith::ArithmeticDialect"
+  ];
+  let options = [
+    ListOption<"strategyString", "strategy", "std::string",
+               "Declarative fusion strategy string."
+               "The format accepts a comma-separated list of tactics among "
+               "seed,producers,producers*,consumers,consumers*,dissolve "
+               "plus a filter in parens, which can take set of any of the "
+               "categories const,generic,el,act,conv,pool,pad,bcast "
+               "e.g. seed(conv),consumers(act),dissolve",
+               "llvm::cl::ZeroOrMore">
   ];
 }
 

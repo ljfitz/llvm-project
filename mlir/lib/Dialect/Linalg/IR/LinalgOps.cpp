@@ -18,6 +18,7 @@
 #include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/AffineExprVisitor.h"
+#include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/PatternMatch.h"
@@ -26,6 +27,7 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -676,6 +678,321 @@ LogicalResult SoftmaxOp::verify() {
   if (dimS >= inputTensor.getRank() || dimS < -inputTensor.getRank())
     return emitOpError("dim must be in range [-inputRank, inputRank)");
   return success();
+}
+
+//===----------------------------------------------------------------------===//
+// FusedOp
+//===----------------------------------------------------------------------===//
+
+void FusedOp::print(OpAsmPrinter &p) {
+  // (%arg0 = %capture0 : type, ...)
+  p << '(';
+  llvm::interleaveComma(llvm::zip(getCaptureArgs(), captures()), p, [&](auto it) {
+    p << std::get<0>(it) << " = " << std::get<1>(it) << " : ";
+    p.printType(std::get<1>(it).getType());
+  });
+  p << ") ";
+
+  // attr-dict-with-keyword
+  auto attrs = static_cast<Operation*>(*this)->getAttrs();
+  p.printOptionalAttrDictWithKeyword(attrs);
+  if (!attrs.empty())
+    p << ' ';
+
+  // { ... }
+  p.printRegion(getBodyRegion(), false);
+
+  // -> type
+  if (result()) {
+    p << " -> ";
+    p.printType(result().getType());
+  };
+}
+
+ParseResult FusedOp::parse(OpAsmParser &p, OperationState &state) {
+  SmallVector<OpAsmParser::UnresolvedOperand> captures;
+  SmallVector<Type> captureTypes;
+  SmallVector<OpAsmParser::UnresolvedOperand> captureArgs;
+
+  // (%arg0 = %capture0 : type, ...)
+  if (p.parseAssignmentListWithTypes(captureArgs, captures, captureTypes))
+    return failure();
+  if (p.resolveOperands(captures, captureTypes, p.getNameLoc(), state.operands))
+    return failure();
+
+  // attr-dict-with-keyword
+  if (p.parseOptionalAttrDictWithKeyword(state.attributes))
+    return failure();
+
+  // { ... }
+  if (p.parseRegion(
+      *state.addRegion(),
+      captureArgs,
+      captureTypes,
+      ArrayRef<Location>{},
+      true))
+    return failure();
+
+  // -> type
+  if (succeeded(p.parseOptionalArrow())) {
+    if (p.parseType(state.types.emplace_back()))
+      return failure();
+  }
+
+  return success();
+}
+
+LogicalResult FusedOp::verify() {
+  // NOTE: SizedRegion<1> already verifie that:
+  //       - there's a single block.
+  // NOTE: SingleBlockImplicitTerminator already verified that:
+  //       - it's terminated by YieldOp.
+
+  if (!llvm::equal(
+      llvm::map_range(captures(), [](auto x) { return x.getType(); }),
+      llvm::map_range(getCaptureArgs(), [](auto x) { return x.getType(); })))
+    return emitOpError("block arguments do not match capture arguments");
+
+  // NOTE: Because we don't implement the LinalgOp interface, we need to do this
+  //       ourselves.
+
+  auto yield = cast<YieldOp>(getBody()->getTerminator());
+
+  // Check that the yield matches the result declaration.
+  if (yield.getNumOperands() != (result() ? 1 : 0))
+    return yield.emitOpError("number of yield operands (")
+        << yield.getNumOperands() << ") does not match number of results ("
+        << (result() ? 1 : 0) << ")";
+  if (result()) {
+    if (yield.getOperand(0).getType() != result().getType())
+      return yield.emitOpError("type of yield operand (")
+          << yield.getOperand(0).getType()
+          << ") does not match result type (" << result().getType() << ")";
+  }
+
+  return success();
+}
+
+using BodyBuilder = void(OpBuilder &, Location, BlockAndValueMapping &);
+
+void FusedOp::build(
+    OpBuilder &builder,
+    OperationState &state,
+    Type resultType,
+    ValueRange captures,
+    function_ref<BodyBuilder> bodyBuilder) {
+  if (resultType)
+    state.types.push_back(resultType);
+
+  state.addOperands(captures);
+
+  auto region = state.addRegion();
+
+  if (!bodyBuilder)
+    return;
+
+  OpBuilder::InsertionGuard guard(builder);
+
+  auto captureTypes = llvm::to_vector(
+      llvm::map_range(captures, [](auto x) { return x.getType(); }));
+  auto captureLocs = llvm::to_vector(
+      llvm::map_range(captures, [](auto x) { return x.getLoc(); }));
+  auto body = builder.createBlock(
+      region,
+      region->end(),
+      captureTypes,
+      captureLocs);
+
+  BlockAndValueMapping captureMapping;
+  for (unsigned idx = 0; idx < captures.size(); ++idx) {
+    captureMapping.map(state.operands[idx], body->getArgument(idx));
+  }
+  bodyBuilder(builder, state.location, captureMapping);
+}
+
+void FusedOp::build(
+    OpBuilder &builder,
+    OperationState &state,
+    ValueRange captures,
+    function_ref<BodyBuilder> bodyBuilder) {
+  build(builder, state, Type{}, captures, bodyBuilder);
+}
+
+namespace {
+
+struct DropUnusedCaptures : OpRewritePattern<FusedOp> {
+  using OpRewritePattern<FusedOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      FusedOp op,
+      PatternRewriter &rewriter) const override {
+    // Compute a pruned mapping of captures values to actually used arguments.
+    BlockAndValueMapping prunedMapping, removedArgs;
+    for (unsigned idx = 0; idx < op.captures().size(); ++idx) {
+      auto arg = op.getCaptureArgs()[idx];
+      if (arg.getUses().empty()) {
+        removedArgs.map(arg, Value{});
+        continue;
+      }
+      prunedMapping.map(op.captures()[idx], arg);
+    }
+
+    if (removedArgs.getValueMap().empty()) {
+      // No captures can be removed.
+      return failure();
+    }
+
+    // Replace this op with a new op that only has the pruned captures.
+    auto prunedCaptures = llvm::to_vector(llvm::map_range(
+      prunedMapping.getValueMap(), [](auto& x) { return x.getFirst(); }));
+    rewriter.setInsertionPoint(op);
+    auto prunedOp = rewriter.create<FusedOp>(
+      op.getLoc(),
+      op.result() ? op.result().getType() : Type{},
+      prunedCaptures);
+    op.body().cloneInto(&prunedOp.getBodyRegion(), removedArgs);
+    rewriter.replaceOp(op, prunedOp.getResults());
+
+    return success();
+  }
+};
+
+struct DropUnusedResult : OpRewritePattern<FusedOp> {
+  using OpRewritePattern<FusedOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      FusedOp op,
+      PatternRewriter &rewriter) const override {
+    if (!op.result() || !op.result().getUses().empty())
+      return failure();
+
+    // Replace this op with a new op that does not have any results.
+    auto newOp = rewriter.create<FusedOp>(
+      op.getLoc(),
+      op.captures());
+    BlockAndValueMapping removedArgs;
+    op.body().cloneInto(&newOp.getBodyRegion(), removedArgs);
+    rewriter.setInsertionPointToEnd(newOp.getBody());
+    rewriter.replaceOpWithNewOp<YieldOp>(newOp.getBody()->getTerminator());
+    rewriter.eraseOp(op);
+
+    return success();
+  }
+};
+
+struct EraseEmptyFusedOp : OpRewritePattern<FusedOp> {
+  using OpRewritePattern<FusedOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      FusedOp op,
+      PatternRewriter &rewriter) const override {
+    auto terminator = op.getBody()->getTerminator();
+    if (terminator != &op.getBody()->front())
+      return failure();
+
+    if (terminator->getNumOperands() == 0) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+
+    auto capture = llvm::find(op.getCaptureArgs(), terminator->getOperand(0));
+    assert(capture != op.getCaptureArgs().end());
+    rewriter.replaceOp(op, op.captures()[capture->getArgNumber()]);
+
+    return success();
+  }
+};
+
+} // namespace <anonymous>
+
+void FusedOp::getCanonicalizationPatterns(
+    RewritePatternSet &results,
+    MLIRContext *context) {
+  results.add<DropUnusedCaptures, DropUnusedResult, EraseEmptyFusedOp>(context);
+}
+
+OperatorClass FusedOp::getOperatorClass() {
+  using llvm::operator|=;
+  auto result = OperatorClass::None;
+  for (auto &op : *getBody()) {
+    if (auto iface = dyn_cast<OperatorClassInterface>(op))
+      result |= iface.getOperatorClass();
+  }
+  return result;
+}
+
+using MemoryEffect = SideEffects::EffectInstance<MemoryEffects::Effect>;
+
+void FusedOp::getEffects(SmallVectorImpl<MemoryEffect> &effects) {
+  struct ArgEffect {
+    /*implicit*/ ArgEffect(Value capture) : capture(capture), effects() {}
+
+    Value capture;
+    SmallPtrSet<MemoryEffects::Effect*, 4> effects;
+  };
+
+  // Preprare to collect side-effects for all captured arguments.
+  DenseMap<Value, ArgEffect> argEffects;
+  for (auto idx = 0UL; idx < getBody()->getNumArguments(); ++idx) {
+    argEffects.try_emplace(getBody()->getArgument(idx), captures()[idx]);
+  }
+
+  // Collect all side-effects on captured arguments.
+  for (auto &op : *getBody()) {
+    auto sideEffectInterface = dyn_cast<MemoryEffectOpInterface>(op);
+    if (!sideEffectInterface)
+      continue;
+
+    SmallVector<MemoryEffect> sideEffects;
+    sideEffectInterface.getEffects(sideEffects);
+    for (auto &sideEffect : sideEffects) {
+      auto it = argEffects.find(sideEffect.getValue());
+      if (it != argEffects.end()) {
+        it->getSecond().effects.insert(sideEffect.getEffect());
+      }
+    }
+  }
+
+  // Emit all these side-effects remapped to the captured arguments.
+  effects.clear();
+  for (auto &pair : argEffects) {
+    for (auto effect : pair.getSecond().effects) {
+      effects.emplace_back(
+          effect,
+          pair.getSecond().capture,
+          SideEffects::DefaultResource::get());
+    }
+  }
+}
+
+OperandRange FusedOp::getSuccessorEntryOperands(unsigned index) {
+  assert(index == 0 && "invalid region index");
+
+  // The body takes the captured values.
+  return captures();
+}
+
+void FusedOp::getSuccessorRegions(
+    Optional<unsigned> index,
+    ArrayRef<Attribute> operands,
+    SmallVectorImpl<RegionSuccessor> &regions) {
+  if (index.hasValue()) {
+    assert(index.getValue() == 0 && "invalid region index");
+
+    // The body branches back to the parent.
+    regions.push_back(RegionSuccessor(getResults()));
+    return;
+  }
+
+  // The entry branches to the body.
+  regions.push_back(RegionSuccessor(&getBodyRegion(), getCaptureArgs()));
+}
+
+void FusedOp::getRegionInvocationBounds(
+    ArrayRef<Attribute> operands,
+    SmallVectorImpl<InvocationBounds> &invocationBounds) {
+  // The body is executed exactly once.
+  invocationBounds.assign(1, {1, 1});
 }
 
 //===----------------------------------------------------------------------===//
@@ -1427,6 +1744,11 @@ LogicalResult linalg::YieldOp::verify() {
   if (auto linalgOp = dyn_cast<LinalgOp>(parentOp))
     return verifyYield(*this, linalgOp);
 
+  if (auto fusedOp = dyn_cast<FusedOp>(parentOp)) {
+    // We perform this verification in the FusedOp.
+    return success();
+  }
+
   return emitOpError("expected parent op with LinalgOp interface");
 }
 
@@ -1826,6 +2148,90 @@ struct InferStaticShapeOfOperands : public OpInterfaceRewritePattern<LinalgOp> {
 
 // All named ops canonicalizers and folders are auto-generated in the
 // .cpp.inc.
+
+//===----------------------------------------------------------------------===//
+// OperatorClassInterfaceFallback
+//===----------------------------------------------------------------------===//
+
+static bool isElementwiseGeneric(LinalgOp op) {
+  if (!op.hasTensorSemantics())
+    return false;
+  if (op.getNumParallelLoops() != op.getNumLoops())
+    return false;
+  if (op.getNumOutputs() != 1)
+    return false;
+  return op.getTiedIndexingMap(op.getOutputOperand(0)).isPermutation();
+}
+
+namespace {
+
+struct OperatorClassInterfaceFallback
+    : OperatorClassInterface::FallbackModel<OperatorClassInterfaceFallback> {
+  OperatorClass getOperatorClass(Operation *op) const {
+    using llvm::operator|;
+
+    //
+    // Known ops
+    //
+
+    if (mlir::detail::isConstantLike(op) || isa<InitTensorOp>(op))
+      return OperatorClass::Constant;
+    if (isa<ApplyBias2DFchwOp, tensor::SplatOp>(op))
+      return OperatorClass::Broadcast;
+    if (isa<Relu2DNchwOp, Lrelu2DNchwOp>(op))
+      return OperatorClass::Activation;
+    if (isa<tensor::PadOp, tensor::SplatOp, linalg::FillOp>(op))
+      return OperatorClass::Padding;
+    if (isa<Conv2DReluOp, Conv2DLreluOp>(op))
+      return OperatorClass::Convolution | OperatorClass::Activation;
+    if (isa<Conv2DLreluMaxpoolOp>(op))
+      return OperatorClass::Convolution
+          | OperatorClass::Activation
+          | OperatorClass::Padding
+          | OperatorClass::Pooling;
+
+    //
+    // Guessing
+    //
+
+    if (isa<arith::ArithmeticDialect, math::MathDialect>(op->getDialect()))
+      return OperatorClass::Elementwise;
+
+    if (auto conv = dyn_cast<ConvolutionOpInterface>(op)) {
+      if (conv.filter().getDefiningOp<InitTensorOp>()) {
+        // Probably a pooling operator.
+        return OperatorClass::Pooling;
+      }
+
+      // Probably a convolution operator.
+      return OperatorClass::Convolution;
+    }
+
+    if (auto generic = dyn_cast<LinalgOp>(op)) {
+      if (isElementwiseGeneric(generic))
+        return OperatorClass::Elementwise;
+
+      return OperatorClass::Generic;
+    }
+
+    return OperatorClass::None;
+  }
+};
+
+} // namespace <anonymous>
+
+OperatorClass mlir::linalg::classifyOperator(Operation *op) {
+  if (auto iface = dyn_cast<OperatorClassInterface>(op)) {
+    return iface.getOperatorClass();
+  }
+
+  return OperatorClassInterfaceFallback().getOperatorClass(op);
+}
+
+void *mlir::linalg::getOperatorClassInterfaceFallback() {
+  static OperatorClassInterfaceFallback instance;
+  return static_cast<void*>(&instance);
+}
 
 //===----------------------------------------------------------------------===//
 // LinalgDialect

@@ -23,6 +23,7 @@ add_mlir_dialect_library(MLIRLinalgTransforms
   Promotion.cpp
   SparseTensorRewriting.cpp
   SplitReduction.cpp
+  StructuralFusion.cpp
   Tiling.cpp
   Transforms.cpp
   Unfuse.cpp
