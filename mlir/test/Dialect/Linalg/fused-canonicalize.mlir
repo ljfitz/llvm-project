@@ -1,6 +1,9 @@
 // RUN: mlir-opt -split-input-file --canonicalize %s
 
+// CHECK-LABEL: func.func @fused_on_tensors(
+// CHECK: %[[arg0:.+]]: tensor<1x3x108x108xf32>
 func.func @fused_on_tensors(%arg0: tensor<1x3x108x108xf32>) -> tensor<1x16x106x106xf32> {
+    // CHECK: %[[result:.+]] linalg.fused (%[[:.+]] = %[[arg0]]
     %result = linalg.fused (%ifm = %arg0 : tensor<1x3x108x108xf32>) {
         %weights = arith.constant dense<5.000000e-01> : tensor<16x3x3x3xf32>
         %init = arith.constant dense<0.000000e00> : tensor<1x16x106x106xf32>
@@ -14,7 +17,9 @@ func.func @fused_on_tensors(%arg0: tensor<1x3x108x108xf32>) -> tensor<1x16x106x1
             outs(%conv : tensor<1x16x106x106xf32>)
             -> tensor<1x16x106x106xf32>
         linalg.yield %act : tensor<1x16x106x106xf32>
+    // CHECK: } -> tensor<1x16x106x106xf32>
     } -> tensor<1x16x106x106xf32>
+    // CHECK: return %[[result]] : tensor<1x16x106x106xf32>
     return %result : tensor<1x16x106x106xf32>
 }
 
