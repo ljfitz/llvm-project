@@ -266,7 +266,7 @@ static FusedOp fuseProducer(FusedOp target, Operation *producer) {
         // Clone the op to be prepended into the new block.
         auto prepended = builder.insert(producer->clone(captures));
 
-        // Remap the catpure arguments of the old FusedOp.
+        // Remap the capture arguments of the old FusedOp.
         for (unsigned idx = 0; idx < target.captures().size(); ++idx) {
           captures.map(
               target.getCaptureArgs()[idx],
@@ -354,7 +354,7 @@ static FusedOp fuseConsumer(FusedOp target, Operation *consumer) {
           : Type{},
       newCaptures,
       [&](OpBuilder &builder, Location loc, BlockAndValueMapping &captures) {
-        // Remap the catpure arguments of the old FusedOp.
+        // Remap the capture arguments of the old FusedOp.
         for (unsigned idx = 0; idx < target.captures().size(); ++idx) {
           captures.map(
               target.getCaptureArgs()[idx],
