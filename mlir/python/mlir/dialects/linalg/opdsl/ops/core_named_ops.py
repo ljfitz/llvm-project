@@ -130,6 +130,19 @@ def apply_bias_2d_fchw(
   domain(D.b, D.f, D.oh, D.ow)
   OFM[D.b, D.f, D.oh, D.ow] = IFM[D.b, D.f, D.oh, D.ow] + bias[D.f]
 
+@linalg_structured_op
+def broadcast_bias_2d_fchw(
+    bias=TensorDef(T1, S.F),
+    OFM=TensorDef(T1, Batch, S.F, S.OH, S.OW, output=True)):
+  """Applies the bias value to the input tensor by broadcasting.
+  
+  Layout:
+    * Input: NFHW
+    * Bias: F
+  """
+  domain(D.b, D.f, D.oh, D.ow)
+  OFM[D.b, D.f, D.oh, D.ow] = bias[D.f]
+
 # Standard linalg ops
 
 @linalg_structured_op

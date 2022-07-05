@@ -17,12 +17,11 @@ func.func @unfuse_conv_2d_tensor_add(%ifm : tensor<1x1024x10x10xf32>, %summand :
         outs(%init : tensor<1x1024x8x8xf32>)
         -> tensor<1x1024x8x8xf32>
 
-    // CHECK: %[[preadd:.+]] = linalg.apply_bias_2d_fchw
-    // CHECK: ins(%[[summand]], %[[bias]] :
-
-    // CHECK: %[[out:.+]] = linalg.conv_2d_nchw_fchw
-    // CHECK: ins(%[[ifm]], %[[weights]] :
-    // CHECK: outs(%[[preadd]] :
+    // CHECK: %[[biased:.+]] = linalg.broadcast_bias_2d_fchw
+    // CHECK: %[[conv:.+]] = linalg.conv_2d_nchw_fchw
+    // CHECK-SAME: ins(%[[ifm]], %[[weights]] :
+    // CHECK=SAME: outs(%[[biased]] :
+    // CHECK: %[[out:.+]] = arith.addf %[[conv]], %[[summand]]
 
     // CHECK: return %[[out]]
     return %result : tensor<1x1024x8x8xf32>
@@ -46,17 +45,15 @@ func.func @unfuse_conv_2d_relu(%ifm : tensor<1x1024x17x17xf32>) -> tensor<1x1024
         outs(%init : tensor<1x1024x7x7xf32>)
         -> tensor<1x1024x7x7xf32>
 
-    // CHECK: %[[biased:.+]] = linalg.apply_bias_2d_fchw
-    // CHECK: ins(%[[init:.+]], %[[bias]] :
-    // CHECK: outs(%[[init]] :
+    // CHECK: %[[biased:.+]] = linalg.broadcast_bias_2d_fchw
 
     // CHECK: %[[conv:.+]] = linalg.conv_2d_nchw_fchw
-    // CHECK: ins(%[[ifm]], %[[weights]] :
-    // CHECK: outs(%[[biased]] :
+    // CHECK-SAME: ins(%[[ifm]], %[[weights]] :
+    // CHECK-SAME: outs(%[[biased]] :
 
     // CHECK: %[[out:.+]] = linalg.relu_2d_nchw
-    // CHECK: ins(%[[conv]] :
-    // CHECK: outs(%[[conv]] :
+    // CHECK-SAME: ins(%[[conv]] :
+    // CHECK-SAME: outs(%[[conv]] :
 
     // CHECK: return %[[out]]
     return %result : tensor<1x1024x7x7xf32>
@@ -81,16 +78,17 @@ func.func @unfuse_conv_2d_tensor_add_relu(%ifm : tensor<1x1024x17x17xf32>, %summ
         outs(%init : tensor<1x1024x7x7xf32>)
         -> tensor<1x1024x7x7xf32>
 
-    // CHECK: %[[preadd:.+]] = linalg.apply_bias_2d_fchw
-    // CHECK: ins(%[[summand]], %[[bias]] :
+    // CHECK: %[[biased:.+]] = linalg.broadcast_bias_2d_fchw
 
     // CHECK: %[[conv:.+]] = linalg.conv_2d_nchw_fchw
-    // CHECK: ins(%[[ifm]], %[[weights]] :
-    // CHECK: outs(%[[preadd]] :
+    // CHECK-SAME: ins(%[[ifm]], %[[weights]] :
+    // CHECK-SAME: outs(%[[biased]] :
+
+    // CHECK: %[[add:.+]] = arith.addf %[[conv]], %[[summand]]
 
     // CHECK: %[[out:.+]] = linalg.relu_2d_nchw
-    // CHECK: ins(%[[conv]] :
-    // CHECK: outs(%[[conv]] :
+    // CHECK-SAME: ins(%[[add]] :
+    // CHECK-SAME: outs(%[[add]] :
 
     // CHECK: return %[[out]]
     return %result : tensor<1x1024x7x7xf32>
@@ -116,17 +114,16 @@ func.func @unfuse_conv_2d_lrelu(%ifm : tensor<1x1024x15x15xf32>) -> tensor<1x102
         outs(%init : tensor<1x1024x13x13xf32>)
         -> tensor<1x1024x13x13xf32>
 
-    // CHECK: %[[biased:.+]] = linalg.apply_bias_2d_fchw
-    // CHECK: ins(%[[init:.+]], %[[bias]] :
-    // CHECK: outs(%[[init]] :
+    // CHECK: %[[biased:.+]] = linalg.broadcast_bias_2d_fchw
+    // CHECK-SAME: ins(%[[bias]] :
 
     // CHECK: %[[conv:.+]] = linalg.conv_2d_nchw_fchw
-    // CHECK: ins(%[[ifm]], %[[weights]] :
-    // CHECK: outs(%[[biased]] :
+    // CHECK-SAME: ins(%[[ifm]], %[[weights]] :
+    // CHECK-SAME: outs(%[[biased]] :
 
     // CHECK: %[[out:.+]] = linalg.lrelu_2d_nchw
-    // CHECK: ins(%[[conv]], %[[alpha]] :
-    // CHECK: outs(%[[conv]] :
+    // CHECK-SAME: ins(%[[conv]], %[[alpha]] :
+    // CHECK-SAME: outs(%[[conv]] :
 
     // CHECK: return %[[out]]
     return %result : tensor<1x1024x13x13xf32>
@@ -153,16 +150,18 @@ func.func @unfuse_conv_2d_tensor_add_lrelu(%ifm : tensor<1x1024x15x15xf32>, %sum
         outs(%init : tensor<1x1024x13x13xf32>)
         -> tensor<1x1024x13x13xf32>
 
-    // CHECK: %[[preadd:.+]] = linalg.apply_bias_2d_fchw
-    // CHECK: ins(%[[summand]], %[[bias]] :
+    // CHECK: %[[biased:.+]] = linalg.broadcast_bias_2d_fchw
+    // CHECK-SAME: ins(%[[bias]] :
 
     // CHECK: %[[conv:.+]] = linalg.conv_2d_nchw_fchw
-    // CHECK: ins(%[[ifm]], %[[weights]] :
-    // CHECK: outs(%[[preadd]] :
+    // CHECK-SAME: ins(%[[ifm]], %[[weights]] :
+    // CHECK-SAME: outs(%[[biased]] :
+
+    // CHECK: %[[add:.+]] = arith.addf %[[conv]], %[[summand]]
 
     // CHECK: %[[out:.+]] = linalg.lrelu_2d_nchw
-    // CHECK: ins(%[[conv]], %[[alpha]] :
-    // CHECK: outs(%[[conv]] :
+    // CHECK-SAME: ins(%[[add]], %[[alpha]] :
+    // CHECK-SAME: outs(%[[add]] :
 
     // CHECK: return %[[out]]
     return %result : tensor<1x1024x13x13xf32>
@@ -197,17 +196,16 @@ func.func @unfuse_conv_2d_lrelu_maxpool(%ifm : tensor<1x1024x15x15xf32>) -> tens
         outs(%init : tensor<1x1024x7x7xf32>)
         -> tensor<1x1024x7x7xf32>
 
-    // CHECK: %[[biased:.+]] = linalg.apply_bias_2d_fchw
-    // CHECK: ins(%[[init:.+]], %[[bias]] :
-    // CHECK: outs(%[[init]] :
+    // CHECK: %[[biased:.+]] = linalg.broadcast_bias_2d_fchw
+    // CHECK-SAME: ins(%[[bias]] :
 
     // CHECK: %[[conv:.+]] = linalg.conv_2d_nchw_fchw
-    // CHECK: ins(%[[ifm]], %[[weights]] :
-    // CHECK: outs(%[[biased]] :
+    // CHECK-SAME: ins(%[[ifm]], %[[weights]] :
+    // CHECK-SAME: outs(%[[biased]] :
 
     // CHECK: %[[lrelu:.+]] = linalg.lrelu_2d_nchw
-    // CHECK: ins(%[[conv]], %[[alpha]] :
-    // CHECK: outs(%[[conv]] :
+    // CHECK-SAME: ins(%[[conv]], %[[alpha]] :
+    // CHECK-SAME: outs(%[[conv]] :
 
     // CHECK: %[[padded:.+]] = tensor.pad %[[lrelu]] low[0, 0, 0, 0] high[0, 0, 1, 1]
     // CHECK: tensor.yield %[[pad_value]] : f32
