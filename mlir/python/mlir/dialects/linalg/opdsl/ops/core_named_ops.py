@@ -15,8 +15,8 @@ def conv_2d_relu(
     K=TensorDef(T2, S.F, S.C, S.KH, S.KW),
     B=TensorDef(T3, S.F),
     O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
-    stride=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
-    dilation=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
+    strides=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
+    dilations=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
   """Performs fused 2-D convolution and relu.
   Layout:
     * Input: NCHW.
@@ -40,8 +40,8 @@ def conv_2d_lrelu(
     B=TensorDef(T3, S.F),
     alpha=ScalarDef(F32),
     O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
-    stride=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
-    dilation=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
+    strides=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
+    dilations=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
   """Performs fused 2-D convolution and leaky-relu.
   Layout:
     * Input: NCHW.
@@ -65,12 +65,12 @@ def conv_2d_lrelu_maxpool(
     B=TensorDef(T3, S.F),
     alpha=ScalarDef(F32),
     O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
-    stride=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
-    dilation=IndexAttrDef(S.DH, S.DW, default=[1, 1]),
+    strides=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
+    dilations=IndexAttrDef(S.DH, S.DW, default=[1, 1]),
     mp_kernel_size=IndexAttrDef(S.MKH, S.MKW, default=[1, 1]),
-    mp_stride=IndexAttrDef(S.MSH, S.MSW, default=[1, 1]),
+    mp_strides=IndexAttrDef(S.MSH, S.MSW, default=[1, 1]),
     mp_padding=IndexAttrDef(S.MPHL, S.MPHH, S.MPWL, S.MPWH, default=[0, 0, 0, 0]),
-    mp_dilation=IndexAttrDef(S.MDH, S.MDW, default=[1, 1])):
+    mp_dilations=IndexAttrDef(S.MDH, S.MDW, default=[1, 1])):
   """Performs fused 2-D convolution, leaky-relu and max-pool.
   Layout:
     * Input: NCHW.
@@ -165,8 +165,8 @@ def conv_2d_tensor_add(
     K=TensorDef(T2, S.F, S.C, S.KH, S.KW),
     B=TensorDef(T3, S.F),
     O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
-    stride=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
-    dilation=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
+    strides=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
+    dilations=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
   """Performs fused 2-D convolution and elementwise add.
 
   Layout:
@@ -192,8 +192,8 @@ def conv_2d_tensor_add_relu(
     K=TensorDef(T2, S.F, S.C, S.KH, S.KW),
     B=TensorDef(T3, S.F),
     O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
-    stride=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
-    dilation=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
+    strides=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
+    dilations=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
   """Performs fused 2-D convolution and elementwise add and relu.
 
   Layout:
@@ -220,8 +220,8 @@ def conv_2d_tensor_add_lrelu(
     B=TensorDef(T3, S.F),
     alpha=ScalarDef(F32),
     O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
-    stride=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
-    dilation=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
+    strides=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
+    dilations=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
   """Performs fused 2-D convolution, elementwise add and leaky-relu.
 
   Layout:

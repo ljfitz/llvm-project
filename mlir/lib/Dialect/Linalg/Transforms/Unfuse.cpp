@@ -103,8 +103,8 @@ Value unfuse2DConvolution(
     assert(ifm && weights && bias && "expected 3 operands");
 
     // Infer the result shape of the convolution.
-    auto dilationAttr = op->getAttr("dilation").cast<DenseIntElementsAttr>();
-    auto strideAttr = op->getAttr("stride").cast<DenseIntElementsAttr>();
+    auto dilationAttr = op->getAttr("dilations").cast<DenseIntElementsAttr>();
+    auto strideAttr = op->getAttr("strides").cast<DenseIntElementsAttr>();
     auto resultTy = infer2DConvolutionResultType(
         ifm.getType().cast<RankedTensorType>(),
         weights.getType().cast<RankedTensorType>(),
@@ -432,8 +432,8 @@ struct Conv2DLreluMaxpoolOpLowering : OpRewritePattern<Conv2DLreluMaxpoolOp> {
                 )
             };
             NamedAttribute attributes[] = {
-                rewriter.getNamedAttr("dilations", op->getAttr("mp_dilation")),
-                rewriter.getNamedAttr("strides", op->getAttr("mp_stride"))
+                rewriter.getNamedAttr("dilations", op->getAttr("mp_dilations")),
+                rewriter.getNamedAttr("strides", op->getAttr("mp_strides"))
             };
             rewriter.replaceOpWithNewOp<PoolingNchwMaxOp>(
                 op,
