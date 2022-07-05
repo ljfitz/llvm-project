@@ -12,7 +12,7 @@ func.func @unfuse_conv_2d_tensor_add(%ifm : tensor<1x1024x10x10xf32>, %summand :
 
     %init = tensor.splat %zero : tensor<1x1024x8x8xf32>
     %result = linalg.conv_2d_tensor_add
-        {dilation = dense<1> : tensor<2xi64>, stride = dense<1> : tensor<2xi64>}
+        {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>}
         ins(%ifm, %summand, %weights, %bias : tensor<1x1024x10x10xf32>, tensor<1x1024x8x8xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>)
         outs(%init : tensor<1x1024x8x8xf32>)
         -> tensor<1x1024x8x8xf32>
@@ -41,7 +41,7 @@ func.func @unfuse_conv_2d_relu(%ifm : tensor<1x1024x17x17xf32>) -> tensor<1x1024
 
     %init = tensor.splat %zero : tensor<1x1024x7x7xf32>
     %result = linalg.conv_2d_relu
-        {dilation = dense<2> : tensor<2xi64>, stride = dense<2> : tensor<2xi64>}
+        {dilations = dense<2> : tensor<2xi64>, strides = dense<2> : tensor<2xi64>}
         ins(%ifm, %weights, %bias : tensor<1x1024x17x17xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>)
         outs(%init : tensor<1x1024x7x7xf32>)
         -> tensor<1x1024x7x7xf32>
@@ -76,7 +76,7 @@ func.func @unfuse_conv_2d_tensor_add_relu(%ifm : tensor<1x1024x17x17xf32>, %summ
 
     %init = tensor.splat %zero : tensor<1x1024x7x7xf32>
     %result = linalg.conv_2d_tensor_add_relu
-        {dilation = dense<2> : tensor<2xi64>, stride = dense<2> : tensor<2xi64>}
+        {dilations = dense<2> : tensor<2xi64>, strides = dense<2> : tensor<2xi64>}
         ins(%ifm, %summand, %weights, %bias : tensor<1x1024x17x17xf32>, tensor<1x1024x7x7xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>)
         outs(%init : tensor<1x1024x7x7xf32>)
         -> tensor<1x1024x7x7xf32>
@@ -111,7 +111,7 @@ func.func @unfuse_conv_2d_lrelu(%ifm : tensor<1x1024x15x15xf32>) -> tensor<1x102
 
     %init = tensor.splat %zero : tensor<1x1024x13x13xf32>
     %result = linalg.conv_2d_lrelu
-        {dilation = dense<1> : tensor<2xi64>, stride = dense<1> : tensor<2xi64>}
+        {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>}
         ins(%ifm, %weights, %bias, %alpha : tensor<1x1024x15x15xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>, f32)
         outs(%init : tensor<1x1024x13x13xf32>)
         -> tensor<1x1024x13x13xf32>
@@ -148,7 +148,7 @@ func.func @unfuse_conv_2d_tensor_add_lrelu(%ifm : tensor<1x1024x15x15xf32>, %sum
 
     %init = tensor.splat %zero : tensor<1x1024x13x13xf32>
     %result = linalg.conv_2d_tensor_add_lrelu
-        {dilation = dense<1> : tensor<2xi64>, stride = dense<1> : tensor<2xi64>}
+        {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>}
         ins(%ifm, %summand, %weights, %bias, %alpha : tensor<1x1024x15x15xf32>, tensor<1x1024x13x13xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>, f32)
         outs(%init : tensor<1x1024x13x13xf32>)
         -> tensor<1x1024x13x13xf32>
@@ -186,11 +186,11 @@ func.func @unfuse_conv_2d_lrelu_maxpool(%ifm : tensor<1x1024x15x15xf32>) -> tens
     %init = tensor.splat %zero : tensor<1x1024x7x7xf32>
     %result = linalg.conv_2d_lrelu_maxpool
         {
-            dilation = dense<1> : tensor<2xi64>,
-            stride = dense<1> : tensor<2xi64>,
+            dilations = dense<1> : tensor<2xi64>,
+            strides = dense<1> : tensor<2xi64>,
             mp_kernel_size = dense<2> : tensor<2xi64>,
-            mp_stride = dense<2> : tensor<2xi64>,
-            mp_dilation = dense<1> : tensor<2xi64>,
+            mp_strides = dense<2> : tensor<2xi64>,
+            mp_dilations = dense<1> : tensor<2xi64>,
             mp_padding = dense<[0, 1, 0, 1]> : tensor<4xi64>
         }
         ins(%ifm, %weights, %bias, %alpha : tensor<1x1024x15x15xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>, f32)
