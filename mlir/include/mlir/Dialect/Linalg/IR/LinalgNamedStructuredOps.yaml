@@ -40,7 +40,7 @@ structured_op: !LinalgStructuredOpConfig
     shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s0,
       s10, s2, s6)>
   - !LinalgOperandDefConfig
-    name: stride
+    name: strides
     kind: index_attr
     index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] ->
       (s3, s7)>
@@ -48,7 +48,7 @@ structured_op: !LinalgStructuredOpConfig
     - 1
     - 1
   - !LinalgOperandDefConfig
-    name: dilation
+    name: dilations
     kind: index_attr
     index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] ->
       (s5, s9)>
@@ -161,7 +161,7 @@ structured_op: !LinalgStructuredOpConfig
     shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s0,
       s10, s2, s6)>
   - !LinalgOperandDefConfig
-    name: stride
+    name: strides
     kind: index_attr
     index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] ->
       (s3, s7)>
@@ -169,7 +169,7 @@ structured_op: !LinalgStructuredOpConfig
     - 1
     - 1
   - !LinalgOperandDefConfig
-    name: dilation
+    name: dilations
     kind: index_attr
     index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] ->
       (s5, s9)>
@@ -293,7 +293,7 @@ structured_op: !LinalgStructuredOpConfig
     shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12,
       s13, s14, s15, s16, s17, s18, s19, s20] -> (s0, s12, s2, s7)>
   - !LinalgOperandDefConfig
-    name: stride
+    name: strides
     kind: index_attr
     index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11,
       s12, s13, s14, s15, s16, s17, s18, s19, s20] -> (s3, s8)>
@@ -301,7 +301,7 @@ structured_op: !LinalgStructuredOpConfig
     - 1
     - 1
   - !LinalgOperandDefConfig
-    name: dilation
+    name: dilations
     kind: index_attr
     index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11,
       s12, s13, s14, s15, s16, s17, s18, s19, s20] -> (s6, s11)>
@@ -317,7 +317,7 @@ structured_op: !LinalgStructuredOpConfig
     - 1
     - 1
   - !LinalgOperandDefConfig
-    name: mp_stride
+    name: mp_strides
     kind: index_attr
     index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11,
       s12, s13, s14, s15, s16, s17, s18, s19, s20] -> (s4, s9)>
@@ -335,7 +335,7 @@ structured_op: !LinalgStructuredOpConfig
     - 0
     - 0
   - !LinalgOperandDefConfig
-    name: mp_dilation
+    name: mp_dilations
     kind: index_attr
     index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11,
       s12, s13, s14, s15, s16, s17, s18, s19, s20] -> (s19, s20)>
@@ -593,6 +593,42 @@ structured_op: !LinalgStructuredOpConfig
           scalar_arg: bias
 --- !LinalgOpConfig
 metadata: !LinalgOpMetadata
+  name: broadcast_bias_2d_fchw
+  cpp_class_name: BroadcastBias2DFchwOp
+  doc: |-
+    Applies the bias value to the input tensor by broadcasting.
+
+    Layout:
+      * Input: NFHW
+      * Bias: F
+structured_op: !LinalgStructuredOpConfig
+  args:
+  - !LinalgOperandDefConfig
+    name: bias
+    kind: input_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1, s2, s3] -> (s0)>
+  - !LinalgOperandDefConfig
+    name: OFM
+    kind: output_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1, s2, s3] -> (s1, s0, s2, s3)>
+  indexing_maps: !LinalgIndexingMapsConfig
+    static_indexing_maps:
+    - affine_map<(d0, d1, d2, d3)[s0, s1, s2, s3] -> (d1)>
+    - affine_map<(d0, d1, d2, d3)[s0, s1, s2, s3] -> (d0, d1, d2, d3)>
+  iterator_types:
+  - parallel
+  - parallel
+  - parallel
+  - parallel
+  assignments:
+  - !ScalarAssign
+    arg: OFM
+    value: !ScalarExpression
+      scalar_arg: bias
+--- !LinalgOpConfig
+metadata: !LinalgOpMetadata
   name: copy
   cpp_class_name: CopyOp
   doc: |-
@@ -728,7 +764,7 @@ structured_op: !LinalgStructuredOpConfig
     shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s0,
       s10, s2, s6)>
   - !LinalgOperandDefConfig
-    name: stride
+    name: strides
     kind: index_attr
     index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] ->
       (s3, s7)>
@@ -736,7 +772,7 @@ structured_op: !LinalgStructuredOpConfig
     - 1
     - 1
   - !LinalgOperandDefConfig
-    name: dilation
+    name: dilations
     kind: index_attr
     index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] ->
       (s5, s9)>
@@ -866,7 +902,7 @@ structured_op: !LinalgStructuredOpConfig
     shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s0,
       s10, s2, s6)>
   - !LinalgOperandDefConfig
-    name: stride
+    name: strides
     kind: index_attr
     index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] ->
       (s3, s7)>
@@ -874,7 +910,7 @@ structured_op: !LinalgStructuredOpConfig
     - 1
     - 1
   - !LinalgOperandDefConfig
-    name: dilation
+    name: dilations
     kind: index_attr
     index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] ->
       (s5, s9)>
@@ -1008,7 +1044,7 @@ structured_op: !LinalgStructuredOpConfig
     shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s0,
       s10, s2, s6)>
   - !LinalgOperandDefConfig
-    name: stride
+    name: strides
     kind: index_attr
     index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] ->
       (s3, s7)>
@@ -1016,7 +1052,7 @@ structured_op: !LinalgStructuredOpConfig
     - 1
     - 1
   - !LinalgOperandDefConfig
-    name: dilation
+    name: dilations
     kind: index_attr
     index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] ->
       (s5, s9)>
