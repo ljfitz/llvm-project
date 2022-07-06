@@ -95,16 +95,14 @@ Value unfuse2DConvolution(
     Operation* op,
     Value ifm,
     Value weights,
-    Value bias,
-    Value dest = {}
-)
+    Value bias)
 {
     // Sanity check: none of these are optional.
     assert(ifm && weights && bias && "expected 3 operands");
 
     // Infer the result shape of the convolution.
-    auto dilationAttr = op->getAttr("dilation").cast<DenseIntElementsAttr>();
-    auto strideAttr = op->getAttr("stride").cast<DenseIntElementsAttr>();
+    auto dilationAttr = op->getAttr("dilations").cast<DenseIntElementsAttr>();
+    auto strideAttr = op->getAttr("strides").cast<DenseIntElementsAttr>();
     auto resultTy = infer2DConvolutionResultType(
         ifm.getType().cast<RankedTensorType>(),
         weights.getType().cast<RankedTensorType>(),
@@ -113,26 +111,13 @@ Value unfuse2DConvolution(
     );
 
     // Ensure we have an appropriately sized destination operand.
-    if (!dest) {
-        auto elementTy = ifm.getType().cast<ShapedType>().getElementType();
-        auto zero = builder.create<arith::ConstantOp>(
-            op->getLoc(),
-            builder.getZeroAttr(elementTy)
-        );
-        dest = builder.create<tensor::SplatOp>(
-            op->getLoc(),
-            zero,
-            resultTy
-        ).getResult();
-    }
-    assert(dest.getType() == resultTy && "expected matching dest");
+    Value dest = builder.create<InitTensorOp>(op->getLoc(), resultTy.getShape(), resultTy.getElementType());
 
     // Apply the bias to dest.
-    //  - We do this before the convolution, since there may be opportunities
-    //    for constant folding / other optimizations.
+    //  - We do this before the convolution, since we assume this is the canonical evaluation order.
     {
-        Value inputs[] = { /*IFM=*/dest, /*bias=*/bias };
-        dest = builder.create<ApplyBias2DFchwOp>(
+        Value inputs[] = { /*bias=*/bias };
+        dest = builder.create<BroadcastBias2DFchwOp>(
             op->getLoc(),
             /*resultTensorTypes=*/resultTy,
             inputs,
@@ -168,17 +153,19 @@ struct Conv2DTensorAddLowering : OpRewritePattern<Conv2DTensorAddOp> {
         assert(op.getNumInputs() == 4 && "expected 4 inputs");
         assert(op.getNumOutputs() == 1 && "expected 1 output");
 
-        // Unfuse the convolution and use the summand directly as destination.
-        rewriter.replaceOp(
+        // Unfuse the convolution.
+        auto convResult = unfuse2DConvolution(
+            rewriter,
             op,
-            unfuse2DConvolution(
-                rewriter,
-                op,
-                /*ifm=*/op.getInputOperand(0)->get(),
-                /*weights=*/op.getInputOperand(2)->get(),
-                /*bias=*/op.getInputOperand(3)->get(),
-                /*dest=*/op.getInputOperand(1)->get()
-            )
+            /*ifm=*/op.getInputOperand(0)->get(),
+            /*weights=*/op.getInputOperand(2)->get(),
+            /*bias=*/op.getInputOperand(3)->get()
+        );
+        // Unfuse the Add.
+        rewriter.replaceOpWithNewOp<arith::AddFOp>(
+            op,
+            convResult,
+            op.getInputOperand(1)->get()
         );
 
         return success();
@@ -202,8 +189,7 @@ struct Conv2DReluLowering : OpRewritePattern<Conv2DReluOp> {
             op,
             /*ifm=*/op.getInputOperand(0)->get(),
             /*weights=*/op.getInputOperand(1)->get(),
-            /*bias=*/op.getInputOperand(2)->get(),
-            /*dest=*/op.getOutputOperand(0)->get()
+            /*bias=*/op.getInputOperand(2)->get()
         );
 
         // Unfuse the ReLU.
@@ -235,16 +221,23 @@ struct Conv2DTensorAddReluLowering : OpRewritePattern<Conv2DTensorAddReluOp> {
             op,
             /*ifm=*/op.getInputOperand(0)->get(),
             /*weights=*/op.getInputOperand(2)->get(),
-            /*bias=*/op.getInputOperand(3)->get(),
-            /*dest=*/op.getInputOperand(1)->get()
+            /*bias=*/op.getInputOperand(3)->get()
         );
+
+        // Unfuse the Add.
+        Value inputs[] = {convResult, op.getInputOperand(1)->get()};
+        auto addResult = rewriter.create<arith::AddFOp>(
+            op->getLoc(),
+            convResult,
+            op.getInputOperand(1)->get()
+        ).getResult();
 
         // Unfuse the ReLU.
         rewriter.replaceOpWithNewOp<Relu2DNchwOp>(
             op,
-            /*resultTensorTypes=*/convResult.getType(),
-            /*inputs=*/convResult,
-            /*outputs=*/convResult
+            /*resultTensorTypes=*/addResult.getType(),
+            /*inputs=*/addResult,
+            /*outputs=*/addResult
         );
 
         return success();
@@ -268,8 +261,7 @@ struct Conv2DLreluOpLowering : OpRewritePattern<Conv2DLreluOp> {
             op,
             /*ifm=*/op.getInputOperand(0)->get(),
             /*weights=*/op.getInputOperand(1)->get(),
-            /*bias=*/op.getInputOperand(2)->get(),
-            /*dest=*/op.getOutputOperand(0)->get()
+            /*bias=*/op.getInputOperand(2)->get()
         );
 
         // Unfuse the leaky ReLU.
@@ -307,21 +299,28 @@ struct Conv2DTensorAddLreluLowering : OpRewritePattern<Conv2DTensorAddLreluOp> {
             op,
             /*ifm=*/op.getInputOperand(0)->get(),
             /*weights=*/op.getInputOperand(2)->get(),
-            /*bias=*/op.getInputOperand(3)->get(),
-            /*dest=*/op.getInputOperand(1)->get()
+            /*bias=*/op.getInputOperand(3)->get()
         );
+
+        // Unfuse the Add.
+        Value inputs[] = {convResult, op.getInputOperand(1)->get()};
+        auto addResult = rewriter.create<arith::AddFOp>(
+            op->getLoc(),
+            convResult,
+            op.getInputOperand(1)->get()
+        ).getResult();
 
         // Unfuse the leaky ReLU.
         {
             Value inputs[] = {
-                /*ifm=*/convResult,
+                /*ifm=*/addResult,
                 /*alpha=*/op.getInputOperand(4)->get()
             };
             rewriter.replaceOpWithNewOp<Lrelu2DNchwOp>(
                 op,
-                /*resultTensorTypes=*/convResult.getType(),
+                /*resultTensorTypes=*/addResult.getType(),
                 inputs,
-                /*outputs=*/convResult
+                /*outputs=*/addResult
             );
         }
 
@@ -385,7 +384,7 @@ struct Conv2DLreluMaxpoolOpLowering : OpRewritePattern<Conv2DLreluMaxpoolOp> {
 
             // Generate a padding value.
             // BUG: xten -> linalg lowering does not pass along the padding
-            //      value! But maxpool is ususally padded with -inf.
+            //      value! But maxpool is usually padded with -inf.
             Attribute padValue;
             if (auto floatTy = elementTy.cast<FloatType>()) {
                 padValue = rewriter.getFloatAttr(
@@ -432,8 +431,8 @@ struct Conv2DLreluMaxpoolOpLowering : OpRewritePattern<Conv2DLreluMaxpoolOp> {
                 )
             };
             NamedAttribute attributes[] = {
-                rewriter.getNamedAttr("dilations", op->getAttr("mp_dilation")),
-                rewriter.getNamedAttr("strides", op->getAttr("mp_stride"))
+                rewriter.getNamedAttr("dilations", op->getAttr("mp_dilations")),
+                rewriter.getNamedAttr("strides", op->getAttr("mp_strides"))
             };
             rewriter.replaceOpWithNewOp<PoolingNchwMaxOp>(
                 op,
