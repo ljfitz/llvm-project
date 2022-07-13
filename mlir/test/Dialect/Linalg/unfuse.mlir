@@ -221,6 +221,56 @@ func.func @unfuse_conv_2d_lrelu_maxpool(%ifm : tensor<1x1024x15x15xf32>) -> tens
 
 // -----
 
+// CHECK-LABEL: func @unfuse_conv_2d_relu_maxpool(
+// CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x15x15xf32>
+func.func @unfuse_conv_2d_relu_maxpool(%ifm : tensor<1x1024x15x15xf32>) -> tensor<1x1024x7x7xf32> {
+    %zero = arith.constant 0.0 : f32
+    // CHECK-DAG: %[[weights:.+]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
+    %weights = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
+    // CHECK-DAG: %[[bias:.+]] = arith.constant dense<3.000000e-01> : tensor<1024xf32>
+    %bias = arith.constant dense<3.000000e-01> : tensor<1024xf32>
+
+    // CHECK-DAG: %[[pad_value:.+]] = arith.constant 0xFF800000 : f32
+
+    %init = tensor.splat %zero : tensor<1x1024x7x7xf32>
+    %result = linalg.conv_2d_relu_maxpool
+        {
+            dilations = dense<1> : tensor<2xi64>,
+            strides = dense<1> : tensor<2xi64>,
+            mp_kernel_size = dense<2> : tensor<2xi64>,
+            mp_strides = dense<2> : tensor<2xi64>,
+            mp_dilations = dense<1> : tensor<2xi64>,
+            mp_padding = dense<[0, 1, 0, 1]> : tensor<4xi64>
+        }
+        ins(%ifm, %weights, %bias : tensor<1x1024x15x15xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>)
+        outs(%init : tensor<1x1024x7x7xf32>)
+        -> tensor<1x1024x7x7xf32>
+
+    // CHECK: %[[biased:.+]] = linalg.broadcast_bias_2d_fchw
+    // CHECK-SAME: ins(%[[bias]] :
+
+    // CHECK: %[[conv:.+]] = linalg.conv_2d_nchw_fchw
+    // CHECK-SAME: ins(%[[ifm]], %[[weights]] :
+    // CHECK-SAME: outs(%[[biased]] :
+
+    // CHECK: %[[lrelu:.+]] = linalg.relu_2d_nchw
+    // CHECK-SAME: ins(%[[conv]] :
+    // CHECK-SAME: outs(%[[conv]] :
+
+    // CHECK: %[[padded:.+]] = tensor.pad %[[lrelu]] low[0, 0, 0, 0] high[0, 0, 1, 1]
+    // CHECK: tensor.yield %[[pad_value]] : f32
+
+    // CHECK: %[[pool:.+]] = linalg.init_tensor [2, 2]
+
+    // CHECK: %[[out:.+]] = linalg.pooling_nchw_max
+    // CHECK: ins(%[[padded]], %[[pool]] :
+
+    // CHECK: return %[[out]]
+    return %result : tensor<1x1024x7x7xf32>
+}
+
+// -----
+
 // CHECK-DAG: #[[sumIn:.+]] = affine_map<(d0, d1, d2) -> (d0, d2, d1)>
 // CHECK-DAG: #[[sumOut:.+]] = affine_map<(d0, d1, d2) -> (d0, 0, d1)>
 // CHECK-DAG: #[[divIn:.+]] = affine_map<(d0, d1, d2) -> (d0, 0, d2)>
