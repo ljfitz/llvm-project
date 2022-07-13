@@ -225,7 +225,6 @@ struct Conv2DTensorAddReluLowering : OpRewritePattern<Conv2DTensorAddReluOp> {
         );
 
         // Unfuse the Add.
-        Value inputs[] = {convResult, op.getInputOperand(1)->get()};
         auto addResult = rewriter.create<arith::AddFOp>(
             op->getLoc(),
             convResult,
@@ -303,7 +302,6 @@ struct Conv2DTensorAddLreluLowering : OpRewritePattern<Conv2DTensorAddLreluOp> {
         );
 
         // Unfuse the Add.
-        Value inputs[] = {convResult, op.getInputOperand(1)->get()};
         auto addResult = rewriter.create<arith::AddFOp>(
             op->getLoc(),
             convResult,
@@ -328,15 +326,46 @@ struct Conv2DTensorAddLreluLowering : OpRewritePattern<Conv2DTensorAddLreluOp> {
     }
 };
 
-struct Conv2DLreluMaxpoolOpLowering : OpRewritePattern<Conv2DLreluMaxpoolOp> {
-    using OpRewritePattern<Conv2DLreluMaxpoolOp>::OpRewritePattern;
+void sanityCheckInputs(Conv2DLreluMaxpoolOp op) {
+  // Sanity check: number of operands, none are optional!
+  assert(op.getNumInputs() == 4 && "expected 4 inputs");
+}
+
+void sanityCheckInputs(Conv2DReluMaxpoolOp op) {
+  // Sanity check: number of operands, none are optional!
+  assert(op.getNumInputs() == 3 && "expected 3 inputs");
+}
+
+Value unfuseActivation(Conv2DLreluMaxpoolOp op, Value ifm,
+                       PatternRewriter &rewriter) {
+  Value inputs[] = {/*ifm=*/ifm,
+                    /*alpha=*/op.getInputOperand(3)->get()};
+  return rewriter
+      .create<Lrelu2DNchwOp>(op->getLoc(),
+                             /*resultTensorTypes=*/ifm.getType(), inputs,
+                             /*outputs=*/ifm)
+      .getResult(0);
+}
+
+Value unfuseActivation(Conv2DReluMaxpoolOp op, Value ifm,
+                       PatternRewriter &rewriter) {
+  Value inputs[] = {/*ifm=*/ifm};
+  return rewriter
+      .create<Relu2DNchwOp>(op->getLoc(),
+                            /*resultTensorTypes=*/ifm.getType(), inputs,
+                            /*outputs=*/ifm)
+      .getResult(0);
+}
+
+template<class T>
+struct Conv2DActivationMaxpoolOpLowering : OpRewritePattern<T> {
+    using OpRewritePattern<T>::OpRewritePattern;
     LogicalResult matchAndRewrite(
-        Conv2DLreluMaxpoolOp op,
+        T op,
         PatternRewriter &rewriter
     ) const override
     {
-        // Sanity check: number of operands, none are optional!
-        assert(op.getNumInputs() == 4 && "expected 4 inputs");
+        sanityCheckInputs(op);
         assert(op.getNumOutputs() == 1 && "expected 1 output");
 
         // Unfuse the convolution.
@@ -349,19 +378,7 @@ struct Conv2DLreluMaxpoolOpLowering : OpRewritePattern<Conv2DLreluMaxpoolOp> {
         );
 
         // Unfuse the leaky ReLU.
-        Value lreluResult;
-        {
-            Value inputs[] = {
-                /*ifm=*/convResult,
-                /*alpha=*/op.getInputOperand(3)->get()
-            };
-            lreluResult = rewriter.create<Lrelu2DNchwOp>(
-                op->getLoc(),
-                /*resultTensorTypes=*/convResult.getType(),
-                inputs,
-                /*outputs=*/convResult
-            ).getResult(0);
-        }
+        Value lreluResult = unfuseActivation(op, convResult, rewriter);
 
         // Unfuse the padding.
         Value padded = lreluResult;
@@ -601,7 +618,8 @@ struct LinalgUnfusePass
             Conv2DTensorAddReluLowering,
             Conv2DLreluOpLowering,
             Conv2DTensorAddLreluLowering,
-            Conv2DLreluMaxpoolOpLowering,
+            Conv2DActivationMaxpoolOpLowering<Conv2DLreluMaxpoolOp>,
+            Conv2DActivationMaxpoolOpLowering<Conv2DReluMaxpoolOp>,
             SoftmaxLowering
         >(&getContext());
 
