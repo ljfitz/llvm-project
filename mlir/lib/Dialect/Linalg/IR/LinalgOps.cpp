@@ -826,33 +826,19 @@ struct DropUnusedCaptures : OpRewritePattern<FusedOp> {
   LogicalResult matchAndRewrite(
       FusedOp op,
       PatternRewriter &rewriter) const override {
-    // Compute a pruned mapping of captures values to actually used arguments.
-    BlockAndValueMapping prunedMapping, removedArgs;
-    for (unsigned idx = 0; idx < op.captures().size(); ++idx) {
-      auto arg = op.getCaptureArgs()[idx];
-      if (arg.getUses().empty()) {
-        removedArgs.map(arg, Value{});
-        continue;
+    // Find all unused arguments.
+    auto unused = llvm::to_vector(llvm::make_filter_range(
+            op.body().getArguments(),
+            [](BlockArgument arg) { return arg.use_empty(); }));
+    if (unused.empty()) return failure();
+
+    rewriter.updateRootInPlace(op, [&]() {
+      for (auto &arg : llvm::reverse(unused)) {
+        // Erase both the operand and the block argument.
+        op->eraseOperand(arg.getArgNumber());
+        op.body().eraseArgument(arg.getArgNumber());
       }
-      prunedMapping.map(op.captures()[idx], arg);
-    }
-
-    if (removedArgs.getValueMap().empty()) {
-      // No captures can be removed.
-      return failure();
-    }
-
-    // Replace this op with a new op that only has the pruned captures.
-    auto prunedCaptures = llvm::to_vector(llvm::map_range(
-      prunedMapping.getValueMap(), [](auto& x) { return x.getFirst(); }));
-    rewriter.setInsertionPoint(op);
-    auto prunedOp = rewriter.create<FusedOp>(
-      op.getLoc(),
-      op.result() ? op.result().getType() : Type{},
-      prunedCaptures);
-    op.body().cloneInto(&prunedOp.getBodyRegion(), removedArgs);
-    rewriter.replaceOp(op, prunedOp.getResults());
-
+    });
     return success();
   }
 };
