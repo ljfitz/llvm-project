@@ -2266,7 +2266,8 @@ struct OperatorClassInterfaceFallback
 
     if (mlir::detail::isConstantLike(op) || isa<InitTensorOp>(op))
       return OperatorClass::Constant;
-    if (isa<ApplyBias2DFchwOp, tensor::SplatOp>(op))
+    if (isa<ApplyBias2DFchwOp, tensor::SplatOp, linalg::BroadcastBias2DFchwOp>(
+            op))
       return OperatorClass::Broadcast;
     if (isa<Relu2DNchwOp, Lrelu2DNchwOp>(op))
       return OperatorClass::Activation;
