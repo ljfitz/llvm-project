@@ -2271,7 +2271,7 @@ struct OperatorClassInterfaceFallback
       return OperatorClass::Broadcast;
     if (isa<Relu2DNchwOp, Lrelu2DNchwOp>(op))
       return OperatorClass::Activation;
-    if (isa<tensor::PadOp, tensor::SplatOp, linalg::FillOp>(op))
+    if (isa<tensor::PadOp, linalg::FillOp>(op))
       return OperatorClass::Padding;
     if (isa<Conv2DReluOp, Conv2DLreluOp>(op))
       return OperatorClass::Convolution | OperatorClass::Activation;
