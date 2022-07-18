@@ -682,20 +682,33 @@ LogicalResult SoftmaxOp::verify() {
 }
 
 //===----------------------------------------------------------------------===//
+// GlobalAveragePool2D
+//===----------------------------------------------------------------------===//
+
+LogicalResult GlobalAveragePool2DOp::verify() {
+  auto inputTensor = input().getType().dyn_cast<RankedTensorType>();
+  auto outputTensor = result().getType().dyn_cast<RankedTensorType>();
+  if (inputTensor.getRank() != outputTensor.getRank())
+    return emitOpError("rank in input and output tensor needs to match");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // FusedOp
 //===----------------------------------------------------------------------===//
 
 void FusedOp::print(OpAsmPrinter &p) {
   // (%arg0 = %capture0 : type, ...)
   p << '(';
-  llvm::interleaveComma(llvm::zip(getCaptureArgs(), captures()), p, [&](auto it) {
-    p << std::get<0>(it) << " = " << std::get<1>(it) << " : ";
-    p.printType(std::get<1>(it).getType());
-  });
+  llvm::interleaveComma(
+      llvm::zip(getCaptureArgs(), captures()), p, [&](auto it) {
+        p << std::get<0>(it) << " = " << std::get<1>(it) << " : ";
+        p.printType(std::get<1>(it).getType());
+      });
   p << ") ";
 
   // attr-dict-with-keyword
-  auto attrs = static_cast<Operation*>(*this)->getAttrs();
+  auto attrs = static_cast<Operation *>(*this)->getAttrs();
   p.printOptionalAttrDictWithKeyword(attrs);
   if (!attrs.empty())
     p << ' ';
@@ -726,12 +739,8 @@ ParseResult FusedOp::parse(OpAsmParser &p, OperationState &state) {
     return failure();
 
   // { ... }
-  if (p.parseRegion(
-      *state.addRegion(),
-      captureArgs,
-      captureTypes,
-      ArrayRef<Location>{},
-      true))
+  if (p.parseRegion(*state.addRegion(), captureArgs, captureTypes,
+                    ArrayRef<Location>{}, true))
     return failure();
 
   // -> type
@@ -750,8 +759,9 @@ LogicalResult FusedOp::verify() {
   //       - it's terminated by YieldOp.
 
   if (!llvm::equal(
-      llvm::map_range(captures(), [](auto x) { return x.getType(); }),
-      llvm::map_range(getCaptureArgs(), [](auto x) { return x.getType(); })))
+          llvm::map_range(captures(), [](auto x) { return x.getType(); }),
+          llvm::map_range(getCaptureArgs(),
+                          [](auto x) { return x.getType(); })))
     return emitOpError("block arguments do not match capture arguments");
 
   // NOTE: Because we don't implement the LinalgOp interface, we need to do this
@@ -762,13 +772,13 @@ LogicalResult FusedOp::verify() {
   // Check that the yield matches the result declaration.
   if (yield.getNumOperands() != (result() ? 1 : 0))
     return yield.emitOpError("number of yield operands (")
-        << yield.getNumOperands() << ") does not match number of results ("
-        << (result() ? 1 : 0) << ")";
+           << yield.getNumOperands() << ") does not match number of results ("
+           << (result() ? 1 : 0) << ")";
   if (result()) {
     if (yield.getOperand(0).getType() != result().getType())
       return yield.emitOpError("type of yield operand (")
-          << yield.getOperand(0).getType()
-          << ") does not match result type (" << result().getType() << ")";
+             << yield.getOperand(0).getType()
+             << ") does not match result type (" << result().getType() << ")";
   }
 
   return success();
@@ -776,12 +786,9 @@ LogicalResult FusedOp::verify() {
 
 using BodyBuilder = void(OpBuilder &, Location, BlockAndValueMapping &);
 
-void FusedOp::build(
-    OpBuilder &builder,
-    OperationState &state,
-    Type resultType,
-    ValueRange captures,
-    function_ref<BodyBuilder> bodyBuilder) {
+void FusedOp::build(OpBuilder &builder, OperationState &state, Type resultType,
+                    ValueRange captures,
+                    function_ref<BodyBuilder> bodyBuilder) {
   if (resultType)
     state.types.push_back(resultType);
 
@@ -798,11 +805,8 @@ void FusedOp::build(
       llvm::map_range(captures, [](auto x) { return x.getType(); }));
   auto captureLocs = llvm::to_vector(
       llvm::map_range(captures, [](auto x) { return x.getLoc(); }));
-  auto body = builder.createBlock(
-      region,
-      region->end(),
-      captureTypes,
-      captureLocs);
+  auto body =
+      builder.createBlock(region, region->end(), captureTypes, captureLocs);
 
   BlockAndValueMapping captureMapping;
   for (unsigned idx = 0; idx < captures.size(); ++idx) {
@@ -811,11 +815,9 @@ void FusedOp::build(
   bodyBuilder(builder, state.location, captureMapping);
 }
 
-void FusedOp::build(
-    OpBuilder &builder,
-    OperationState &state,
-    ValueRange captures,
-    function_ref<BodyBuilder> bodyBuilder) {
+void FusedOp::build(OpBuilder &builder, OperationState &state,
+                    ValueRange captures,
+                    function_ref<BodyBuilder> bodyBuilder) {
   build(builder, state, Type{}, captures, bodyBuilder);
 }
 
@@ -824,14 +826,14 @@ namespace {
 struct DropUnusedCaptures : OpRewritePattern<FusedOp> {
   using OpRewritePattern<FusedOp>::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(
-      FusedOp op,
-      PatternRewriter &rewriter) const override {
+  LogicalResult matchAndRewrite(FusedOp op,
+                                PatternRewriter &rewriter) const override {
     // Find all unused arguments.
     auto unused = llvm::to_vector(llvm::make_filter_range(
-            op.body().getArguments(),
-            [](BlockArgument arg) { return arg.use_empty(); }));
-    if (unused.empty()) return failure();
+        op.body().getArguments(),
+        [](BlockArgument arg) { return arg.use_empty(); }));
+    if (unused.empty())
+      return failure();
 
     rewriter.updateRootInPlace(op, [&]() {
       for (auto &arg : llvm::reverse(unused)) {
@@ -847,16 +849,13 @@ struct DropUnusedCaptures : OpRewritePattern<FusedOp> {
 struct DropUnusedResult : OpRewritePattern<FusedOp> {
   using OpRewritePattern<FusedOp>::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(
-      FusedOp op,
-      PatternRewriter &rewriter) const override {
+  LogicalResult matchAndRewrite(FusedOp op,
+                                PatternRewriter &rewriter) const override {
     if (!op.result() || !op.result().getUses().empty())
       return failure();
 
     // Replace this op with a new op that does not have any results.
-    auto newOp = rewriter.create<FusedOp>(
-      op.getLoc(),
-      op.captures());
+    auto newOp = rewriter.create<FusedOp>(op.getLoc(), op.captures());
     BlockAndValueMapping removedArgs;
     op.body().cloneInto(&newOp.getBodyRegion(), removedArgs);
     rewriter.setInsertionPointToEnd(newOp.getBody());
@@ -870,9 +869,8 @@ struct DropUnusedResult : OpRewritePattern<FusedOp> {
 struct EraseEmptyFusedOp : OpRewritePattern<FusedOp> {
   using OpRewritePattern<FusedOp>::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(
-      FusedOp op,
-      PatternRewriter &rewriter) const override {
+  LogicalResult matchAndRewrite(FusedOp op,
+                                PatternRewriter &rewriter) const override {
     auto terminator = op.getBody()->getTerminator();
     if (terminator != &op.getBody()->front())
       return failure();
@@ -890,11 +888,10 @@ struct EraseEmptyFusedOp : OpRewritePattern<FusedOp> {
   }
 };
 
-} // namespace <anonymous>
+} // namespace
 
-void FusedOp::getCanonicalizationPatterns(
-    RewritePatternSet &results,
-    MLIRContext *context) {
+void FusedOp::getCanonicalizationPatterns(RewritePatternSet &results,
+                                          MLIRContext *context) {
   results.add<DropUnusedCaptures, DropUnusedResult, EraseEmptyFusedOp>(context);
 }
 
@@ -915,7 +912,7 @@ void FusedOp::getEffects(SmallVectorImpl<MemoryEffect> &effects) {
     /*implicit*/ ArgEffect(Value capture) : capture(capture), effects() {}
 
     Value capture;
-    SmallPtrSet<MemoryEffects::Effect*, 4> effects;
+    SmallPtrSet<MemoryEffects::Effect *, 4> effects;
   };
 
   // Preprare to collect side-effects for all captured arguments.
@@ -944,10 +941,8 @@ void FusedOp::getEffects(SmallVectorImpl<MemoryEffect> &effects) {
   effects.clear();
   for (auto &pair : argEffects) {
     for (auto effect : pair.getSecond().effects) {
-      effects.emplace_back(
-          effect,
-          pair.getSecond().capture,
-          SideEffects::DefaultResource::get());
+      effects.emplace_back(effect, pair.getSecond().capture,
+                           SideEffects::DefaultResource::get());
     }
   }
 }
@@ -959,10 +954,9 @@ OperandRange FusedOp::getSuccessorEntryOperands(unsigned index) {
   return captures();
 }
 
-void FusedOp::getSuccessorRegions(
-    Optional<unsigned> index,
-    ArrayRef<Attribute> operands,
-    SmallVectorImpl<RegionSuccessor> &regions) {
+void FusedOp::getSuccessorRegions(Optional<unsigned> index,
+                                  ArrayRef<Attribute> operands,
+                                  SmallVectorImpl<RegionSuccessor> &regions) {
   if (index.hasValue()) {
     assert(index.getValue() == 0 && "invalid region index");
 
@@ -2276,10 +2270,8 @@ struct OperatorClassInterfaceFallback
     if (isa<Conv2DReluOp, Conv2DLreluOp>(op))
       return OperatorClass::Convolution | OperatorClass::Activation;
     if (isa<Conv2DLreluMaxpoolOp>(op))
-      return OperatorClass::Convolution
-          | OperatorClass::Activation
-          | OperatorClass::Padding
-          | OperatorClass::Pooling;
+      return OperatorClass::Convolution | OperatorClass::Activation |
+             OperatorClass::Padding | OperatorClass::Pooling;
 
     //
     // Guessing
@@ -2309,7 +2301,7 @@ struct OperatorClassInterfaceFallback
   }
 };
 
-} // namespace <anonymous>
+} // namespace
 
 OperatorClass mlir::linalg::classifyOperator(Operation *op) {
   if (auto iface = dyn_cast<OperatorClassInterface>(op)) {
@@ -2321,7 +2313,7 @@ OperatorClass mlir::linalg::classifyOperator(Operation *op) {
 
 void *mlir::linalg::getOperatorClassInterfaceFallback() {
   static OperatorClassInterfaceFallback instance;
-  return static_cast<void*>(&instance);
+  return static_cast<void *>(&instance);
 }
 
 //===----------------------------------------------------------------------===//
