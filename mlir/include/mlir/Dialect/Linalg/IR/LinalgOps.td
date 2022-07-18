@@ -198,6 +198,17 @@ def Linalg_SoftmaxOp : Linalg_Op<"softmax", [NoSideEffect]> {
   let hasVerifier = 1;
 }
 
+def Linalg_GlobalAveragePool2DOp : Linalg_Op<"globalaveragepool2d", [NoSideEffect]> {
+  let arguments = (ins AnyTensor:$input);
+  let results = (outs AnyTensor:$result);
+  let summary = "linalg globalaveragepool2d operation";
+  let description = [{
+    This implements the globalaveragepool2d operator.
+  }];
+  let assemblyFormat = [{ attr-dict `ins``(` $input `:` type($input)`)` `->` type(results) }];
+  let hasVerifier = 1;
+}
+
 def Linalg_FusedOp
     : Linalg_Op<"fused", [
         IsolatedFromAbove,
