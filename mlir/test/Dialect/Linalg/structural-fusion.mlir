@@ -1,21 +1,21 @@
-// RUN: mlir-opt %s -split-input-file -linalg-unfuse '-linalg-structural-fusion=strategy=seed(conv),producers(bcast),consumers(act),consumers(pad),producers(pad),consumers(pool)' \
+// RUN: mlir-opt %s -split-input-file -linalg-unfuse -linalg-structural-fusion \
 // RUN: | FileCheck %s
 
 // Verify that the expected operations are put into the fused operation
 // CHECK-LABEL: func @forward(
 // CHECK: %[[ARG0:[a-z0-9_]+]]: tensor<1x3x416x416xf32>)
-// CHECK: %[[CST0:[a-z0-9_]+]] = arith.constant dense<1.000000e+00> : tensor<16xf32>
-// CHECK: %[[CST1:[a-z0-9_]+]] = arith.constant 0.000000e+00 : f32
-// CHECK: %[[CST2:[a-z0-9_]+]] = arith.constant dense<1.000000e+00> : tensor<16x3x3x3xf32>
+// CHECK: %[[CST:[a-z0-9_]+]] = arith.constant dense<1.000000e+00> : tensor<16xf32>
+// CHECK: %[[CST0:[a-z0-9_]+]] = arith.constant 0.000000e+00 : f32
+// CHECK: %[[CST1:[a-z0-9_]+]] = arith.constant dense<1.000000e+00> : tensor<16x3x3x3xf32>
 // CHECK: %[[INIT_TENSOR0:[a-z0-9_]+]] = linalg.init_tensor [2, 2] : tensor<2x2xf32>
 // CHECK: %[[INIT_TENSOR1:[a-z0-9_]+]] = linalg.init_tensor [1, 16, 416, 416] : tensor<1x16x416x416xf32>
 // CHECK: %[[INIT_TENSOR2:[a-z0-9_]+]] = linalg.init_tensor [1, 16, 208, 208] : tensor<1x16x208x208xf32>
-// CHECK: %[[FUSED:[a-z0-9_]+]] = linalg.fused(%[[ARG1:[a-z0-9_]+]] = %[[CST2]] {{.*}}, %[[ARG2:[a-z0-9_]+]] = %[[CST0]] {{.*}}, %[[ARG3:[a-z0-9_]+]] = %[[INIT_TENSOR1]] {{.*}}, %[[ARG4:[a-z0-9_]+]] = %[[CST1]] {{.*}}, %[[ARG5:[a-z0-9_]+]] = %[[ARG0]] {{.*}}, %[[ARG6:[a-z0-9_]+]] = %[[INIT_TENSOR0]] {{.*}}, %[[ARG7:[a-z0-9_]+]] = %[[INIT_TENSOR2]]
-// CHECK: %[[PAD:[a-z0-9_]+]] = tensor.pad %[[ARG5]] low[0, 0, 1, 1] high[0, 0, 1, 1]
-// CHECK:   tensor.yield %[[ARG4]]
-// CHECK: %[[BROAD:[a-z0-9_]+]] = linalg.broadcast_bias_2d_fchw ins(%[[ARG2]]{{.*}}) outs(%[[ARG3]]{{.*}})
-// CHECK: %[[CONV:[a-z0-9_]+]] = linalg.conv_2d_nchw_fchw {{.*}} ins(%[[PAD]], %[[ARG1]]{{.*}}) outs(%[[BROAD]]{{.*}})
-// CHECK: %[[LRELU:[a-z0-9_]+]] = linalg.lrelu_2d_nchw ins(%[[CONV]], %[[ARG4]]{{.*}}) outs(%[[CONV]]{{.*}})
+// CHECK: %[[PAD:[a-z0-9_]+]] = tensor.pad %[[ARG0]] low[0, 0, 1, 1] high[0, 0, 1, 1]
+// CHECK:   tensor.yield %[[CST0]]
+// CHECK: %[[FUSED:[a-z0-9_]+]] = linalg.fused(%[[ARG1:[a-z0-9_]+]] = %[[PAD]] {{.*}}, %[[ARG2:[a-z0-9_]+]] = %[[CST1]] {{.*}}, %[[ARG3:[a-z0-9_]+]] = %[[CST0]] {{.*}}, %[[ARG4:[a-z0-9_]+]] = %[[CST]] {{.*}}, %[[ARG5:[a-z0-9_]+]] = %[[INIT_TENSOR1]] {{.*}}, %[[ARG6:[a-z0-9_]+]] = %[[INIT_TENSOR0]] {{.*}}, %[[ARG7:[a-z0-9_]+]] = %[[INIT_TENSOR2]]
+// CHECK: %[[BROAD:[a-z0-9_]+]] = linalg.broadcast_bias_2d_fchw ins(%[[ARG4]]{{.*}}) outs(%[[ARG5]]{{.*}})
+// CHECK: %[[CONV:[a-z0-9_]+]] = linalg.conv_2d_nchw_fchw {{.*}} ins(%[[ARG1]], %[[ARG2]]{{.*}}) outs(%[[BROAD]]{{.*}})
+// CHECK: %[[LRELU:[a-z0-9_]+]] = linalg.lrelu_2d_nchw ins(%[[CONV]], %[[ARG3]]{{.*}}) outs(%[[CONV]]{{.*}})
 // CHECK: %[[MAXPOOL:[a-z0-9_]+]] = linalg.pooling_nchw_max {{.*}} ins(%[[LRELU]], %[[ARG6]]{{.*}}) outs(%[[ARG7]]{{.*}})
 // CHECK: linalg.yield %[[MAXPOOL]]
 // CHECK: return %[[FUSED]]
