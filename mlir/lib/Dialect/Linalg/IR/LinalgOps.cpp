@@ -2162,20 +2162,18 @@ struct OperatorClassInterfaceFallback
 
     if (mlir::detail::isConstantLike(op) || isa<InitTensorOp>(op))
       return OperatorClass::Constant;
-    if (isa<ApplyBias2DFchwOp, tensor::SplatOp, linalg::BroadcastBias2DFchwOp>(
-            op))
+    if (isa<ApplyBias2DFchwOp, tensor::SplatOp, linalg::BroadcastBias2DFchwOp,
+            linalg::FillOp>(op))
       return OperatorClass::Broadcast;
     if (isa<Relu2DNchwOp, Lrelu2DNchwOp>(op))
       return OperatorClass::Activation;
-    if (isa<tensor::PadOp, linalg::FillOp>(op))
+    if (isa<tensor::PadOp>(op))
       return OperatorClass::Padding;
     if (isa<Conv2DReluOp, Conv2DLreluOp>(op))
       return OperatorClass::Convolution | OperatorClass::Activation;
     if (isa<Conv2DLreluMaxpoolOp>(op))
-      return OperatorClass::Convolution
-          | OperatorClass::Activation
-          | OperatorClass::Padding
-          | OperatorClass::Pooling;
+      return OperatorClass::Convolution | OperatorClass::Activation |
+             OperatorClass::Padding | OperatorClass::Pooling;
 
     //
     // Guessing
