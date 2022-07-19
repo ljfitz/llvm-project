@@ -507,6 +507,7 @@ private:
     using llvm::operator&;
 
     size_t result = 0;
+    work.clear();
     getOperation().walk([&](Operation *op, const WalkStage &stage) {
       if (isa<FusedOp>(op)) {
         // Do not look into fused ops.
