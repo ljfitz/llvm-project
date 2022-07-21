@@ -471,24 +471,49 @@ struct LinalgStructuralFusionPass
       } else {
         static Strategy defaultStrategy;
         if (defaultStrategy.empty()) {
+          // We use a double-seeded approach. For the first one we use:
+          //  1. Start with all pooling operations
+          //  2. Fuse them with producers: paddings, activations, convolutions,
+          //     broadcasts and constants and finally paddings again.
+          //
+          // We fuse paddings twice to first fuse them with poolings and then
+          // a second time to fuse them with convolutions.
+          //
+          // For the 2nd seed, we use the following tactics:
+          //  1. Start with all convolutions
+          //  2. Fuse them activation consumers
+          //  3. Fuse them with producers: broadcasts, constant, paddings
+          //
+          // The 2nd seed is required as we might have convolutions that are not
+          // consumed by poolings. The first seed would not catch those.
+
+          // 1st Seed
           defaultStrategy.push_back(
-            Tactic{Tactic::Method::Seed, OperatorClass::Convolution}
-          );
+              Tactic{Tactic::Method::Seed, OperatorClass::Pooling});
           defaultStrategy.push_back(
-            Tactic{Tactic::Method::FuseConsumers, OperatorClass::Activation}
-          );
+              Tactic{Tactic::Method::FuseProducers, OperatorClass::Padding});
           defaultStrategy.push_back(
-            Tactic{Tactic::Method::Dissolve, OperatorClass{}}
-          );
+              Tactic{Tactic::Method::FuseProducers, OperatorClass::Activation});
+          defaultStrategy.push_back(Tactic{Tactic::Method::FuseProducers,
+                                           OperatorClass::Convolution});
           defaultStrategy.push_back(
-            Tactic{Tactic::Method::FuseProducers, OperatorClass::Broadcast}
-          );
+              Tactic{Tactic::Method::FuseProducers, OperatorClass::Broadcast});
           defaultStrategy.push_back(
-            Tactic{Tactic::Method::FuseConsumers, OperatorClass::Padding}
-          );
+              Tactic{Tactic::Method::FuseProducers, OperatorClass::Constant});
           defaultStrategy.push_back(
-            Tactic{Tactic::Method::FuseConsumers, OperatorClass::Pooling}
-          );
+              Tactic{Tactic::Method::FuseProducers, OperatorClass::Padding});
+
+          // 2nd Seed
+          defaultStrategy.push_back(
+              Tactic{Tactic::Method::Seed, OperatorClass::Convolution});
+          defaultStrategy.push_back(
+              Tactic{Tactic::Method::FuseConsumers, OperatorClass::Activation});
+          defaultStrategy.push_back(
+              Tactic{Tactic::Method::FuseProducers, OperatorClass::Broadcast});
+          defaultStrategy.push_back(
+              Tactic{Tactic::Method::FuseProducers, OperatorClass::Constant});
+          defaultStrategy.push_back(
+              Tactic{Tactic::Method::FuseProducers, OperatorClass::Padding});
         }
 
         strategy = defaultStrategy;
@@ -507,6 +532,7 @@ private:
     using llvm::operator&;
 
     size_t result = 0;
+    work.clear();
     getOperation().walk([&](Operation *op, const WalkStage &stage) {
       if (isa<FusedOp>(op)) {
         // Do not look into fused ops.
