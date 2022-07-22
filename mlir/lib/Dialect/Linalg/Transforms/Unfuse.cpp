@@ -499,77 +499,6 @@ struct SoftmaxLowering : OpRewritePattern<SoftmaxOp> {
   }
 };
 
-struct GlobalAveragePool2DLowering : OpRewritePattern<GlobalAveragePool2DOp> {
-  using OpRewritePattern<GlobalAveragePool2DOp>::OpRewritePattern;
-  LogicalResult matchAndRewrite(GlobalAveragePool2DOp op,
-                                PatternRewriter &rewriter) const override {
-    Location loc = op.getLoc();
-    Value input = op.input();
-    RankedTensorType inputTy = input.getType().cast<RankedTensorType>();
-
-    assert(inputTy && "expected tensor operand");
-    assert(inputTy.getShape().size() == 4 && "expected input tensor of rank 4");
-
-    // Compute result type with reduced spatial dimensions.
-    std::array<int64_t, 4> resultShape = {inputTy.getShape()[0],
-                                          inputTy.getShape()[1], 1, 1};
-    auto resultTy =
-        RankedTensorType::get(resultShape, inputTy.getElementType());
-
-    // Define pooling op to accumulate spatial dimensions.
-    Value kernel = rewriter.create<linalg::InitTensorOp>(
-        loc, SmallVector<int64_t>{inputTy.getShape()[2], inputTy.getShape()[3]},
-        resultTy.getElementType());
-    Attribute strideAttr = rewriter.getI64VectorAttr({1, 1});
-    Attribute dilationAttr = rewriter.getI64VectorAttr({1, 1});
-    NamedAttribute attributes[] = {
-        rewriter.getNamedAttr("dilations", dilationAttr),
-        rewriter.getNamedAttr("strides", strideAttr)};
-    Value zero = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getZeroAttr(resultTy.getElementType()));
-    Value accu =
-        rewriter.create<tensor::SplatOp>(loc, zero, resultTy).getResult();
-    Value sum = rewriter
-                    .create<linalg::PoolingNchwSumOp>(
-                        loc, ArrayRef<Type>{resultTy},
-                        ValueRange{input, kernel}, accu, attributes)
-                    .getResult(0);
-    Value numElements = rewriter.create<arith::ConstantOp>(
-        loc, resultTy.getElementType(),
-        rewriter.getFloatAttr(resultTy.getElementType(),
-                              inputTy.getShape()[2] * inputTy.getShape()[3]));
-    Value divisor = rewriter.create<tensor::SplatOp>(loc, numElements, resultTy)
-                        .getResult();
-
-    // Divide pooled accumulation by number of spatial input elements.
-    const auto rank = static_cast<unsigned>(inputTy.getRank());
-    AffineMap inMap;
-    {
-      SmallVector<AffineExpr> builder;
-      for (unsigned idx = 0; idx < rank; ++idx) {
-        builder.push_back(getAffineDimExpr(idx, rewriter.getContext()));
-      }
-      inMap = AffineMap::get(rank, 0, builder, rewriter.getContext());
-    }
-    AffineMap indexingMaps[] = {
-        inMap, AffineMap::getMultiDimIdentityMap(rank, rewriter.getContext())};
-
-    SmallVector<StringRef> iteratorTypes(rank, "parallel");
-    rewriter.replaceOpWithNewOp<linalg::GenericOp>(
-        op,
-        /*resultTensorTypes=*/resultTy,
-        /*inputs=*/sum,
-        /*outputs=*/divisor, indexingMaps, iteratorTypes,
-        [](OpBuilder &builder, Location loc, ValueRange args) {
-          auto div =
-              builder.create<arith::DivFOp>(loc, args[0], args[1]).getResult();
-          builder.create<linalg::YieldOp>(loc, div);
-        });
-
-    return success();
-  }
-};
-
 struct LinalgUnfusePass : public LinalgUnfuseBase<LinalgUnfusePass> {
   void runOnOperation() override {
     RewritePatternSet patterns(&getContext());
@@ -581,7 +510,7 @@ struct LinalgUnfusePass : public LinalgUnfuseBase<LinalgUnfusePass> {
                  Conv2DTensorAddLreluLowering,
                  Conv2DActivationMaxpoolOpLowering<Conv2DLreluMaxpoolOp>,
                  Conv2DActivationMaxpoolOpLowering<Conv2DReluMaxpoolOp>,
-                 SoftmaxLowering, GlobalAveragePool2DLowering>(&getContext());
+                 SoftmaxLowering>(&getContext());
 
     (void)applyPatternsAndFoldGreedily(getOperation().getBody(),
                                        std::move(patterns));
