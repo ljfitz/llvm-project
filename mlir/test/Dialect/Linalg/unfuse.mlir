@@ -308,13 +308,12 @@ func.func @unfuse_globalaveragepool2d(%ifm : tensor<1x2048x7x7xf32>) -> tensor<1
     %result = linalg.globalaveragepool2d ins(%ifm : tensor<1x2048x7x7xf32>) -> tensor<1x2048x1x1xf32>
 
     // CHECK: %[[accu:.+]] = arith.constant dense<0.000000e+00> : tensor<1x2048x1x1xf32>
-    // CHECK: %[[res:.+]] = arith.constant dense<4.900000e+01> : tensor<1x2048x1x1xf32>
-    // CHECK: %[[init:.+]] = linalg.init_tensor [7, 7] : tensor<7x7xf32>
-
+    // CHECK: %[[div:.+]] = arith.constant dense<4.900000e+01> : tensor<1x2048x1x1xf32>
+    // CHECK: %[[krnl:.+]] = linalg.init_tensor [7, 7] : tensor<7x7xf32>
     // CHECK: %[[sum:.+]] = linalg.pooling_nchw_sum {dilations = dense<1> : vector<2xi64>, strides = dense<1> : vector<2xi64>} ins(%arg0, %0 : tensor<1x2048x7x7xf32>, tensor<7x7xf32>) outs(%[[accu]] : tensor<1x2048x1x1xf32>) -> tensor<1x2048x1x1xf32>
-    // CHECK: %[[out:.+]] = linalg.generic {indexing_maps = [#map, #map], iterator_types = ["parallel", "parallel", "parallel", "parallel"]} ins(%[[sum]] : tensor<1x2048x1x1xf32>) outs(%[[res]] : tensor<1x2048x1x1xf32>)
-    // CHECK: arith.divf %arg1, %arg2 : f32
+    // CHECK: %[[out:.+]] = arith.divf %[[sum]], %[[div]] : tensor<1x2048x1x1xf32>
 
     // CHECK: return %[[out]]
+
     return %result : tensor<1x2048x1x1xf32>
 }

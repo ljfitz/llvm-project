@@ -499,6 +499,56 @@ struct SoftmaxLowering : OpRewritePattern<SoftmaxOp> {
   }
 };
 
+struct GlobalAveragePool2DLowering : OpRewritePattern<GlobalAveragePool2DOp> {
+  using OpRewritePattern<GlobalAveragePool2DOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(GlobalAveragePool2DOp op,
+                                PatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    Value input = op.input();
+    RankedTensorType inputTy = input.getType().cast<RankedTensorType>();
+
+    assert(inputTy && "expected tensor operand");
+    assert((inputTy.getElementType()
+                .isa<Float16Type, Float32Type, Float64Type>()) &&
+           "expected float input type");
+    assert(inputTy.getShape().size() == 4 && "expected input tensor of rank 4");
+
+    // Compute result type with reduced spatial dimensions.
+    std::array<int64_t, 4> resultShape = {inputTy.getShape()[0],
+                                          inputTy.getShape()[1], 1, 1};
+    auto resultTy =
+        RankedTensorType::get(resultShape, inputTy.getElementType());
+
+    // Define pooling op to accumulate spatial dimensions.
+    Value kernel = rewriter.create<linalg::InitTensorOp>(
+        loc, SmallVector<int64_t>{inputTy.getShape()[2], inputTy.getShape()[3]},
+        resultTy.getElementType());
+    Attribute strideAttr = rewriter.getI64VectorAttr({1, 1});
+    Attribute dilationAttr = rewriter.getI64VectorAttr({1, 1});
+    NamedAttribute attributes[] = {
+        rewriter.getNamedAttr("dilations", dilationAttr),
+        rewriter.getNamedAttr("strides", strideAttr)};
+    Value zero = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getZeroAttr(resultTy.getElementType()));
+    Value accu =
+        rewriter.create<tensor::SplatOp>(loc, zero, resultTy).getResult();
+    Value sum = rewriter
+                    .create<linalg::PoolingNchwSumOp>(
+                        loc, ArrayRef<Type>{resultTy},
+                        ValueRange{input, kernel}, accu, attributes)
+                    .getResult(0);
+    Value numElements = rewriter.create<arith::ConstantOp>(
+        loc, resultTy.getElementType(),
+        rewriter.getFloatAttr(resultTy.getElementType(),
+                              inputTy.getShape()[2] * inputTy.getShape()[3]));
+    Value divisor = rewriter.create<tensor::SplatOp>(loc, numElements, resultTy)
+                        .getResult();
+
+    rewriter.replaceOpWithNewOp<arith::DivFOp>(op, sum, divisor);
+    return success();
+  }
+};
+
 struct LinalgUnfusePass : public LinalgUnfuseBase<LinalgUnfusePass> {
   void runOnOperation() override {
     RewritePatternSet patterns(&getContext());
