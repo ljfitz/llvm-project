@@ -204,6 +204,7 @@ def Linalg_GlobalAveragePool2DOp : Linalg_Op<"globalaveragepool2d", [NoSideEffec
   let summary = "linalg globalaveragepool2d operation";
   let description = [{
     This implements the globalaveragepool2d operator.
+    The custom op is unfused into `linalg.pooling_nchw_sum` and `arith.divf`.
   }];
   let assemblyFormat = [{ attr-dict `ins``(` $input `:` type($input)`)` `->` type(results) }];
   let hasVerifier = 1;

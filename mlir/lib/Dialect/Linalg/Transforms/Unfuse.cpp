@@ -508,6 +508,9 @@ struct GlobalAveragePool2DLowering : OpRewritePattern<GlobalAveragePool2DOp> {
     RankedTensorType inputTy = input.getType().cast<RankedTensorType>();
 
     assert(inputTy && "expected tensor operand");
+    assert((inputTy.getElementType()
+                .isa<Float16Type, Float32Type, Float64Type>()) &&
+           "expected float input type");
     assert(inputTy.getShape().size() == 4 && "expected input tensor of rank 4");
 
     // Compute result type with reduced spatial dimensions.
@@ -541,31 +544,7 @@ struct GlobalAveragePool2DLowering : OpRewritePattern<GlobalAveragePool2DOp> {
     Value divisor = rewriter.create<tensor::SplatOp>(loc, numElements, resultTy)
                         .getResult();
 
-    // Divide pooled accumulation by number of spatial input elements.
-    const auto rank = static_cast<unsigned>(inputTy.getRank());
-    AffineMap inMap;
-    {
-      SmallVector<AffineExpr> builder;
-      for (unsigned idx = 0; idx < rank; ++idx) {
-        builder.push_back(getAffineDimExpr(idx, rewriter.getContext()));
-      }
-      inMap = AffineMap::get(rank, 0, builder, rewriter.getContext());
-    }
-    AffineMap indexingMaps[] = {
-        inMap, AffineMap::getMultiDimIdentityMap(rank, rewriter.getContext())};
-
-    SmallVector<StringRef> iteratorTypes(rank, "parallel");
-    rewriter.replaceOpWithNewOp<linalg::GenericOp>(
-        op,
-        /*resultTensorTypes=*/resultTy,
-        /*inputs=*/sum,
-        /*outputs=*/divisor, indexingMaps, iteratorTypes,
-        [](OpBuilder &builder, Location loc, ValueRange args) {
-          auto div =
-              builder.create<arith::DivFOp>(loc, args[0], args[1]).getResult();
-          builder.create<linalg::YieldOp>(loc, div);
-        });
-
+    rewriter.replaceOpWithNewOp<arith::DivFOp>(op, sum, divisor);
     return success();
   }
 };
