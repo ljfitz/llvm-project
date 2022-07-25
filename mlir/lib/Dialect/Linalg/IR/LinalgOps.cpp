@@ -673,7 +673,7 @@ LogicalResult SoftmaxOp::verify() {
   if (!inputTensor || !outputTensor)
     return failure();
   if (inputTensor.getShape() != outputTensor.getShape())
-    return emitOpError("input and output dimensions must be the same");
+    return emitOpError("input and output shapes must be the same");
 
   auto dimS = dimAttr().getValue().getSExtValue();
   if (dimS >= inputTensor.getRank() || dimS < -inputTensor.getRank())
@@ -688,8 +688,13 @@ LogicalResult SoftmaxOp::verify() {
 LogicalResult GlobalAveragePool2DOp::verify() {
   auto inputTensor = input().getType().dyn_cast<RankedTensorType>();
   auto outputTensor = result().getType().dyn_cast<RankedTensorType>();
+  if (!inputTensor || !outputTensor)
+    return failure();
   if (inputTensor.getRank() != outputTensor.getRank())
     return emitOpError("rank in input and output tensor needs to match");
+  if ((inputTensor.getShape()[0] != outputTensor.getShape()[0]) ||
+      (inputTensor.getShape()[1] != outputTensor.getShape()[1]))
+    return emitOpError("input and output batchsize and channel needs to match");
   return success();
 }
 
