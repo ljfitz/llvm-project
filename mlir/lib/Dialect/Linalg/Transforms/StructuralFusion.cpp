@@ -512,8 +512,14 @@ struct LinalgStructuralFusionPass
           //
           // For the 2nd seed, we use the following tactics:
           //  1. Start with all convolutions
-          //  2. Fuse them activation consumers
-          //  3. Fuse them with producers: broadcasts, constant, paddings
+          //  2. Fuse them with producers: broadcasts, constant, paddings
+          //  3. Fuse them with elementwise operations (e.g. tensor.add) if they
+          //     are on the longest path to the function entry (longest ancestor
+          //     consumer fusion)
+          //  4. Fuse activation consumers
+          //  5. Fuse constant producers again, since some additional constants
+          //     might be fusable after the activations have been fused (e.g.
+          //     constants used in LeakyRelU)
           //
           // The 2nd seed is required as we might have convolutions that are not
           // consumed by poolings. The first seed would not catch those.
@@ -538,13 +544,18 @@ struct LinalgStructuralFusionPass
           defaultStrategy.push_back(
               Tactic{Tactic::Method::Seed, OperatorClass::Convolution});
           defaultStrategy.push_back(
-              Tactic{Tactic::Method::FuseConsumers, OperatorClass::Activation});
-          defaultStrategy.push_back(
               Tactic{Tactic::Method::FuseProducers, OperatorClass::Broadcast});
           defaultStrategy.push_back(
               Tactic{Tactic::Method::FuseProducers, OperatorClass::Constant});
           defaultStrategy.push_back(
               Tactic{Tactic::Method::FuseProducers, OperatorClass::Padding});
+          defaultStrategy.push_back(
+              Tactic{Tactic::Method::FuseLongestAncestorConsumer,
+                     OperatorClass::Elementwise});
+          defaultStrategy.push_back(
+              Tactic{Tactic::Method::FuseConsumers, OperatorClass::Activation});
+          defaultStrategy.push_back(
+              Tactic{Tactic::Method::FuseProducers, OperatorClass::Constant});
         }
 
         strategy = defaultStrategy;
