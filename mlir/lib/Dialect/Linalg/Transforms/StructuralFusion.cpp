@@ -50,32 +50,36 @@ static bool canWrapInFusedOp(Operation *target) {
 
   // - target must have exactly 0 or 1 result
   switch (target->getNumResults()) {
-    case 0:
-      return true;
+  case 0:
+    return true;
 
-    case 1:
-      // - the result must be any ranked tensor type
-      return target->getResult(0).getType().isa<RankedTensorType>();
+  case 1:
+    // - the result must be any ranked tensor type
+    return target->getResult(0).getType().isa<RankedTensorType>();
 
-    default:
-      return false;
+  default:
+    return false;
   }
 }
 
-static void collectUses(Operation *root, Operation *op, SmallVectorImpl<Value> &uses) {
+static void collectUses(Operation *root, Operation *op,
+                        SmallVectorImpl<Value> &uses) {
   const auto isLocal = [&](Value value) {
     auto source = value.getDefiningOp();
     if (auto barg = value.dyn_cast<BlockArgument>())
       source = barg.getOwner()->getParentOp();
     while (source) {
-      if (source == root) return true;
+      if (source == root)
+        return true;
       source = source->getParentOp();
     }
     return false;
   };
   const auto unite = [&](Value operand) {
-    if (isLocal(operand)) return;
-    if (llvm::find(uses, operand) != uses.end()) return;
+    if (isLocal(operand))
+      return;
+    if (llvm::find(uses, operand) != uses.end())
+      return;
     uses.push_back(operand);
   };
 
@@ -116,17 +120,15 @@ static FusedOp wrapInFusedOp(Operation *target) {
   OpBuilder builder(target);
   auto fusedOp = builder.create<FusedOp>(
       target->getLoc(),
-      /*resulType=*/target->getNumResults()
-          ? target->getResult(0).getType()
-          : Type{},
+      /*resulType=*/target->getNumResults() ? target->getResult(0).getType()
+                                            : Type{},
       /*captures=*/captures,
       [=](OpBuilder &builder, Location loc, BlockAndValueMapping &captures) {
         // Clone the target op into the FusedOp.
         auto clonedOp = builder.insert(target->clone(captures));
         // Yield the result of the cloned op (which may have none).
-        builder.create<linalg::YieldOp>(
-            target->getLoc(),
-            clonedOp->getResults());
+        builder.create<linalg::YieldOp>(target->getLoc(),
+                                        clonedOp->getResults());
       });
 
   // Remove the target operation.
@@ -156,7 +158,7 @@ static bool canUnwrapFusedOp(FusedOp target) {
 /// @pre      `canUnwrapFusedOp(target)`
 ///
 /// Essentially exactly undoes what wrapInFusedOp() does.
-static Operation* unwrapFusedOp(FusedOp target) {
+static Operation *unwrapFusedOp(FusedOp target) {
   assert(canUnwrapFusedOp(target));
 
   // Compute the mapping from captured arguments to operands.
@@ -165,7 +167,7 @@ static Operation* unwrapFusedOp(FusedOp target) {
   // Clone the wrapped op out of the FusedOp.
   OpBuilder builder(target);
   auto unwrapped = builder.insert(
-    target.getBody()->getOperations().front().clone(unCaptureMapping));
+      target.getBody()->getOperations().front().clone(unCaptureMapping));
 
   // Remove the target operation
   target.replaceAllUsesWith(unwrapped);
@@ -178,13 +180,10 @@ static bool mustDuplicateProducer(FusedOp target, Operation *producer) {
   assert(producer);
 
   // Duplicates if there is one user of a result of producer that is not target.
-  return llvm::any_of(
-      producer->getResults(),
-      [=](Value value) {
-        return llvm::any_of(
-            value.getUsers(),
-            [=](auto user) { return user != target; });
-      });
+  return llvm::any_of(producer->getResults(), [=](Value value) {
+    return llvm::any_of(value.getUsers(),
+                        [=](auto user) { return user != target; });
+  });
 }
 
 /// Determines whether @p producer can be prepended to @p target .
@@ -246,9 +245,8 @@ static FusedOp fuseProducer(FusedOp target, Operation *producer) {
     auto capture = target.captures()[idx];
     if (capture.getDefiningOp() == producer) {
       // Capture will be replaced by op result.
-      argToResultIdx.try_emplace(
-          target.getCaptureArgs()[idx],
-          resultIndex(capture));
+      argToResultIdx.try_emplace(target.getCaptureArgs()[idx],
+                                 resultIndex(capture));
       continue;
     }
 
@@ -271,9 +269,8 @@ static FusedOp fuseProducer(FusedOp target, Operation *producer) {
 
         // Remap the capture arguments of the old FusedOp.
         for (unsigned idx = 0; idx < target.captures().size(); ++idx) {
-          captures.map(
-              target.getCaptureArgs()[idx],
-              captures.lookup(target.captures()[idx]));
+          captures.map(target.getCaptureArgs()[idx],
+                       captures.lookup(target.captures()[idx]));
         }
 
         // Update the capture mapping with results of the prepended op.
@@ -307,9 +304,8 @@ static bool canFuseConsumer(FusedOp target, Operation *consumer) {
     return false;
 
   // - consumer must be the only user of target (if any).
-  if (llvm::any_of(
-      target->getUsers(),
-      [&](auto user) { return user != consumer; }))
+  if (llvm::any_of(target->getUsers(),
+                   [&](auto user) { return user != consumer; }))
     return false;
 
   // - consumer must be wrappable
@@ -370,9 +366,8 @@ static FusedOp fuseConsumer(FusedOp target, Operation *consumer) {
   // Ensure that all operands of consumer are captured.
   auto newCaptures = llvm::to_vector(target.captures());
   collectUses(consumer, consumer, newCaptures);
-  llvm::erase_if(
-      newCaptures,
-      [&](Value capture) { return capture == target.result(); });
+  llvm::erase_if(newCaptures,
+                 [&](Value capture) { return capture == target.result(); });
 
   // Create the new FusedOp.
   OpBuilder builder(consumer);
@@ -385,9 +380,8 @@ static FusedOp fuseConsumer(FusedOp target, Operation *consumer) {
       [&](OpBuilder &builder, Location loc, BlockAndValueMapping &captures) {
         // Remap the capture arguments of the old FusedOp.
         for (unsigned idx = 0; idx < target.captures().size(); ++idx) {
-          captures.map(
-              target.getCaptureArgs()[idx],
-              captures.lookup(target.captures()[idx]));
+          captures.map(target.getCaptureArgs()[idx],
+                       captures.lookup(target.captures()[idx]));
         }
 
         // Clone the contents of the old body (without the terminator).
@@ -398,16 +392,14 @@ static FusedOp fuseConsumer(FusedOp target, Operation *consumer) {
         // If the old fused op had a result, add it to the mapping.
         auto terminator = target.getBody()->getTerminator();
         if (terminator->getNumOperands())
-          captures.map(
-              target.result(),
-              captures.lookup(terminator->getOperand(0)));
+          captures.map(target.result(),
+                       captures.lookup(terminator->getOperand(0)));
 
         // Clone the op to be appended to the new block.
         auto appended = builder.insert(consumer->clone(captures));
         // Yield the result of the cloned op (which may have none).
-        builder.create<linalg::YieldOp>(
-            target->getLoc(),
-            appended->getResults());
+        builder.create<linalg::YieldOp>(target->getLoc(),
+                                        appended->getResults());
       });
 
   // Remove the consumer and then the target operation.
@@ -493,7 +485,7 @@ struct LinalgStructuralFusionPass
         auto parsed = parseStrategy(strategyString);
         if (failed(parsed)) {
           llvm::WithColor::error()
-            << "[linalg-structural-fusion] error parsing strategy\n";
+              << "[linalg-structural-fusion] error parsing strategy\n";
           signalPassFailure();
           return;
         }
@@ -632,9 +624,8 @@ private:
   FailureOr<FusedOp> fuseFirstProducer(FusedOp target, OperatorClass filter) {
     for (auto op : target.getOperands()) {
       auto candidate = op.getDefiningOp();
-      if (!candidate
-          || !matches(candidate, filter)
-          || !canFuseProducer(target, candidate))
+      if (!candidate || !matches(candidate, filter) ||
+          !canFuseProducer(target, candidate))
         continue;
 
       return ::fuseProducer(target, candidate);
@@ -662,16 +653,14 @@ private:
 
   size_t fuseProducers(WorkingSet &work, OperatorClass filter) {
     WorkingSet results;
-    llvm::erase_if(
-        work,
-        [&](FusedOp op) {
-          auto fused = fuseProducers(op, filter);
-          if (failed(fused))
-            return false;
+    llvm::erase_if(work, [&](FusedOp op) {
+      auto fused = fuseProducers(op, filter);
+      if (failed(fused))
+        return false;
 
-          results.push_back(fused.getValue());
-          return true;
-        });
+      results.push_back(fused.getValue());
+      return true;
+    });
     work.append(results);
     return results.size();
   }
@@ -734,16 +723,14 @@ private:
 
   size_t dissolve(WorkingSet &work) {
     size_t result = 0;
-    llvm::erase_if(
-        work,
-        [&](FusedOp op) {
-          if (!canUnwrapFusedOp(op))
-            return false;
+    llvm::erase_if(work, [&](FusedOp op) {
+      if (!canUnwrapFusedOp(op))
+        return false;
 
-          unwrapFusedOp(op);
-          ++result;
-          return true;
-        });
+      unwrapFusedOp(op);
+      ++result;
+      return true;
+    });
     return result;
   }
 
@@ -763,7 +750,8 @@ private:
       return fuseConsumers(work, tactic.filter, /* longestAncestor */ true);
     case Tactic::Method::Dissolve:
       return dissolve(work);
-    default: llvm_unreachable("unknown tactic");
+    default:
+      llvm_unreachable("unknown tactic");
     }
   }
 
@@ -783,6 +771,7 @@ private:
 
 } // namespace
 
-std::unique_ptr<OperationPass<func::FuncOp>> mlir::createLinalgStructuralFusionPass() {
+std::unique_ptr<OperationPass<func::FuncOp>>
+mlir::createLinalgStructuralFusionPass() {
   return std::make_unique<LinalgStructuralFusionPass>();
 }
