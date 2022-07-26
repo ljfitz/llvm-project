@@ -901,13 +901,7 @@ void FusedOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 OperatorClass FusedOp::getOperatorClass() {
-  using llvm::operator|=;
-  auto result = OperatorClass::None;
-  for (auto &op : *getBody()) {
-    if (auto iface = dyn_cast<OperatorClassInterface>(op))
-      result |= iface.getOperatorClass();
-  }
-  return result;
+  return OperatorClass::None;
 }
 
 using MemoryEffect = SideEffects::EffectInstance<MemoryEffects::Effect>;
