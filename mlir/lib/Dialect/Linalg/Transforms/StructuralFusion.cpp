@@ -20,14 +20,17 @@
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/ImplicitLocOpBuilder.h"
+#include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/SideEffectUtils.h"
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/WithColor.h"
+#include <algorithm>
 
 #define DEBUG_TYPE "linalg-structural-fusion"
 
@@ -313,6 +316,32 @@ static bool canFuseConsumer(FusedOp target, Operation *consumer) {
   return canWrapInFusedOp(consumer);
 }
 
+/// Computes the length of the longest path from \p op to the function entry
+static size_t computeAncestorLength(Operation *op) {
+  if (!op)
+    return 0;
+
+  // Cache the results to avoid re-computation
+  static DenseMap<Operation *, size_t> lengthCache;
+
+  // Check cache before starting the computation
+  auto it = lengthCache.find(op);
+  if (it != lengthCache.end()) {
+    return it->second;
+  }
+
+  size_t currentLength = 0;
+  for (unsigned idx = 0; idx < op->getNumOperands(); ++idx) {
+    Operation *ancestor = op->getOperand(idx).getDefiningOp();
+    currentLength =
+        std::max(currentLength, 1 + computeAncestorLength(ancestor));
+  }
+
+  // Update cache with computed value
+  lengthCache.insert({op, currentLength});
+  return currentLength;
+}
+
 /// Fused @p consumer into @p target .
 ///
 /// See canFuseConsumer() on what scenarios this transformation is allowed in.
@@ -398,6 +427,7 @@ struct Tactic {
     FuseProducersGreedy,
     FuseConsumers,
     FuseConsumersGreedy,
+    FuseLongestAncestorConsumer,
     Dissolve
   };
 
@@ -415,6 +445,7 @@ static FailureOr<Tactic> parseTactic(StringRef string) {
         .Case("producers*", Tactic::Method::FuseProducersGreedy)
         .Case("consumers", Tactic::Method::FuseConsumers)
         .Case("consumers*", Tactic::Method::FuseConsumersGreedy)
+        .Case("longest_consumer", Tactic::Method::FuseLongestAncestorConsumer)
         .Case("dissolve", Tactic::Method::Dissolve)
         .Default(llvm::None);
   };
@@ -528,6 +559,39 @@ private:
 
   using WorkingSet = llvm::SmallVector<FusedOp>;
 
+  // Check whether \p target is the longest ancestor of \p consumer. Ancestors
+  // that are not a fused operation or are not part of \p work are ignored.
+  bool isLongestAncestor(WorkingSet &work, FusedOp target,
+                         Operation *consumer) {
+    if (!consumer)
+      return false;
+
+    // Keep track of the longest path and the FusedOp linked to it
+    FusedOp longestAncestorFuse = nullptr;
+    size_t longestAncestorLength = 0;
+    for (unsigned idx = 0; idx < consumer->getNumOperands(); ++idx) {
+      Operation *ancestor = consumer->getOperand(idx).getDefiningOp();
+
+      // Skip any operands that are not a fused op or not part of the worklist
+      auto fusedAncestor = dyn_cast_or_null<FusedOp>(ancestor);
+      if (!fusedAncestor || llvm::find(work, fusedAncestor) == work.end())
+        continue;
+
+      unsigned currentAncestorLength = computeAncestorLength(fusedAncestor);
+
+      // Update if a longer path was found
+      if (currentAncestorLength > longestAncestorLength) {
+        longestAncestorLength = currentAncestorLength;
+        longestAncestorFuse = fusedAncestor;
+      }
+    }
+
+    // target is the longest ancestor if it is the same FusedOp that was found
+    // to have the longest path
+    assert(longestAncestorFuse && "No ancestor found!");
+    return longestAncestorFuse == target;
+  }
+
   size_t seed(WorkingSet &work, OperatorClass filter) {
     using llvm::operator&;
 
@@ -609,30 +673,42 @@ private:
     return result;
   }
 
-  FailureOr<FusedOp> fuseConsumer(FusedOp target, OperatorClass filter) {
+  FailureOr<FusedOp> fuseConsumer(FusedOp target, OperatorClass filter,
+                                  WorkingSet &work, bool longestAncestor) {
     if (!target.result())
       return failure();
 
     assert(!target.result().getUsers().empty());
     Operation *candidate = *target.result().getUsers().begin();
-    if (!matches(candidate, filter) || !canFuseConsumer(target, candidate))
+    if (!matches(candidate, filter) || !canFuseConsumer(target, candidate) ||
+        (longestAncestor && !isLongestAncestor(work, target, candidate)))
       return failure();
 
     return ::fuseConsumer(target, candidate);
   }
 
-  size_t fuseConsumers(WorkingSet &work, OperatorClass filter) {
+  /// Fuse all consumers of a fused operation that match the given \p filter.
+  /// If there is more than one consumer, no fusion is applied.
+  ///
+  /// If \p longestAncestor is set, the consumer is only fused to the fused
+  /// operation with the longest path to a shared input or function entry. For
+  /// consumers with only a single input, there is trivially only one path and
+  /// setting this flag will have no effect.
+  /// Consumers with multiple inputs have their inputs traversed until either a
+  /// shared input or the function entry is reached. The consumer is fused with
+  /// the fused operation that has the longer path. Inputs that are not fused
+  /// operations or are not in \p work are ignored.
+  size_t fuseConsumers(WorkingSet &work, OperatorClass filter,
+                       bool longestAncestor = false) {
     WorkingSet results;
-    llvm::erase_if(
-        work,
-        [&](FusedOp op) {
-          auto fused = fuseConsumer(op, filter);
-          if (failed(fused))
-            return false;
+    llvm::erase_if(work, [&](FusedOp op) {
+      auto fused = fuseConsumer(op, filter, work, longestAncestor);
+      if (failed(fused))
+        return false;
 
-          results.push_back(fused.getValue());
-          return true;
-        });
+      results.push_back(fused.getValue());
+      return true;
+    });
     work.append(results);
     return results.size();
   }
@@ -672,6 +748,8 @@ private:
       return fuseConsumers(work, tactic.filter);
     case Tactic::Method::FuseConsumersGreedy:
       return fuseConsumersGreedy(work, tactic.filter);
+    case Tactic::Method::FuseLongestAncestorConsumer:
+      return fuseConsumers(work, tactic.filter, /* longestAncestor */ true);
     case Tactic::Method::Dissolve:
       return dissolve(work);
     default: llvm_unreachable("unknown tactic");
