@@ -210,6 +210,100 @@ def Linalg_GlobalAveragePool2DOp : Linalg_Op<"globalaveragepool2d", [NoSideEffec
   let hasVerifier = 1;
 }
 
+def Linalg_Conv2dTensorAddAveragePoolOp
+    : Linalg_Op<"conv_2d_tensor_add_averagepool", [NoSideEffect]> {
+  let arguments = (ins AnyTensor:$I,
+                       AnyTensor:$J,
+                       AnyTensor:$K,
+                       AnyTensor:$B,
+                       AnyTensor:$O,
+                       AnyIntElementsAttr:$strides,
+                       AnyIntElementsAttr:$dilations
+  );
+  let results = (outs AnyTensor:$result);
+  let summary = "Conv2D + Tensor-Add + GlobalAveragePool compound operation";
+  let description = [{
+    Performs fused 2-D convolution, elementwise add and global average pool.
+
+    Layout:
+      * Input: NCHW
+      * Kernel: FCHW
+  }];
+  let assemblyFormat = [{
+    attr-dict
+    `ins``(` $I`,` $J`,` $K`,` $B
+      `:` type($I)`,` type($J)`,` type($K)`,` type($B)`)`
+    `outs``(` $O `:` type($O)`)`
+    `->` type(results)
+  }];
+  let hasVerifier = 1;
+}
+
+def Linalg_Conv2dTensorAddReluAveragePoolOp
+    : Linalg_Op<"conv_2d_tensor_add_relu_averagepool", [NoSideEffect]> {
+  let arguments = (ins AnyTensor:$I,
+                       AnyTensor:$J,
+                       AnyTensor:$K,
+                       AnyTensor:$B,
+                       AnyTensor:$O,
+                       AnyIntElementsAttr:$strides,
+                       AnyIntElementsAttr:$dilations
+  );
+  let results = (outs AnyTensor:$result);
+  let summary = [{
+    Conv2D + Tensor-Add + ReLU + GlobalAveragePool compound operation
+  }];
+  let description = [{
+    Performs fused 2-D convolution, elementwise add, ReLU and global average
+    pool.
+
+    Layout:
+      * Input: NCHW
+      * Kernel: FCHW
+  }];
+  let assemblyFormat = [{
+    attr-dict
+    `ins``(` $I`,` $J`,` $K`,` $B
+      `:` type($I)`,` type($J)`,` type($K)`,` type($B)`)`
+    `outs``(` $O `:` type($O)`)`
+    `->` type(results)
+  }];
+  let hasVerifier = 1;
+}
+
+def Linalg_Conv2dTensorAddLreluAveragePoolOp
+    : Linalg_Op<"conv_2d_tensor_add_lrelu_averagepool", [NoSideEffect]> {
+  let arguments = (ins AnyTensor:$I,
+                       AnyTensor:$J,
+                       AnyTensor:$K,
+                       AnyTensor:$B,
+                       F32:$alpha,
+                       AnyTensor:$O,
+                       AnyIntElementsAttr:$strides,
+                       AnyIntElementsAttr:$dilations
+  );
+  let results = (outs AnyTensor:$result);
+  let summary = [{
+    Conv2D + Tensor-Add + LeakyReLU + GlobalAveragePool compound operation
+  }];
+  let description = [{
+    Performs fused 2-D convolution, elementwise add, LeakyReLU and global
+    average pool.
+
+    Layout:
+      * Input: NCHW
+      * Kernel: FCHW
+  }];
+  let assemblyFormat = [{
+    attr-dict
+    `ins``(` $I`,` $J`,` $K`,` $B`,` $alpha
+      `:` type($I)`,` type($J)`,` type($K)`,` type($B)`,` type($alpha)`)`
+    `outs``(` $O `:` type($O)`)`
+    `->` type(results)
+  }];
+  let hasVerifier = 1;
+}
+
 def Linalg_FusedOp
     : Linalg_Op<"fused", [
         IsolatedFromAbove,
