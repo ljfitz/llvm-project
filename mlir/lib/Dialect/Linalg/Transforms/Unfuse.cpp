@@ -549,6 +549,78 @@ struct GlobalAveragePool2DLowering : OpRewritePattern<GlobalAveragePool2DOp> {
   }
 };
 
+Value createMappingOp(PatternRewriter &rewriter, Location loc,
+                      ArrayRef<AffineExpr> inputIndex, Value originalTensor,
+                      Value outputTensor, int64_t inputRank) {
+  SmallVector<StringRef> iteratorTypes(inputRank, "parallel");
+  SmallVector<AffineMap> indexMap = {
+      AffineMap::get(/*dimCount=*/inputRank, /*symbolCount=*/0, inputIndex,
+                     rewriter.getContext()),
+      rewriter.getMultiDimIdentityMap(inputRank)};
+  Value mappingOperator =
+      rewriter
+          .create<GenericOp>(loc, outputTensor.getType(), originalTensor,
+                             outputTensor, indexMap, iteratorTypes,
+                             [](OpBuilder &b, Location loc, ValueRange args) {
+                               b.create<linalg::YieldOp>(loc, args[0]);
+                             })
+          ->getResult(0);
+  return mappingOperator;
+}
+
+/// Torch MLIR does a similar lowering for their Linear operator to lin alg
+/// here we implement the same so we can run tests using the unfused version
+struct LinearLowering : OpRewritePattern<LinearOp> {
+  using OpRewritePattern<LinearOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(LinearOp op,
+                                PatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    Value input = op.input();
+    Value weights = op.weights();
+    Value bias = op.bias();
+    Value output = op->getResult(0);
+
+    auto inputType = input.getType().cast<RankedTensorType>();
+    auto weightsType = weights.getType().cast<RankedTensorType>();
+    auto biasType = bias.getType().cast<RankedTensorType>();
+    auto outputType = output.getType().cast<RankedTensorType>();
+
+    if (inputType.getRank() != 2 || weightsType.getRank() != 2) {
+      return rewriter.notifyMatchFailure(op,
+                                         "input and weights must be rank 2");
+    }
+    if (biasType.getRank() != 1) {
+      return rewriter.notifyMatchFailure(op, "bias must be rank 1");
+    }
+
+    // Create a generic linalg op that transposes the weights tensor
+    // The transposedWeights is simply used to describe the output shape.
+    Value transposedWeights = rewriter.create<InitTensorOp>(
+        loc,
+        ArrayRef<int64_t>{weightsType.getShape()[1], weightsType.getShape()[0]},
+        weightsType.getElementType());
+    Value transposeWeightsOp = createMappingOp(
+        rewriter, loc,
+        {rewriter.getAffineDimExpr(1), rewriter.getAffineDimExpr(0)}, weights,
+        transposedWeights, inputType.getRank());
+
+    // Create a generic linalg op that broadcasts the 1D bias values across
+    // the 2nd dimension
+    Value broadcastedBias = rewriter.create<InitTensorOp>(
+        loc, outputType.getShape(), biasType.getElementType());
+    Value broadcastBiasOp =
+        createMappingOp(rewriter, loc, {rewriter.getAffineDimExpr(1)}, bias,
+                        broadcastedBias, inputType.getRank());
+
+    // Create the matmul operation that does the multiplcation and addition
+    rewriter.replaceOpWithNewOp<MatmulOp>(op, output.getType(),
+                                          ValueRange{input, transposeWeightsOp},
+                                          broadcastBiasOp);
+
+    return success();
+  }
+};
+
 struct LinalgUnfusePass : public LinalgUnfuseBase<LinalgUnfusePass> {
   void runOnOperation() override {
     RewritePatternSet patterns(&getContext());
@@ -560,7 +632,8 @@ struct LinalgUnfusePass : public LinalgUnfuseBase<LinalgUnfusePass> {
                  Conv2DTensorAddLreluLowering,
                  Conv2DActivationMaxpoolOpLowering<Conv2DLreluMaxpoolOp>,
                  Conv2DActivationMaxpoolOpLowering<Conv2DReluMaxpoolOp>,
-                 SoftmaxLowering, GlobalAveragePool2DLowering>(&getContext());
+                 SoftmaxLowering, GlobalAveragePool2DLowering, LinearLowering>(
+        &getContext());
 
     (void)applyPatternsAndFoldGreedily(getOperation().getBody(),
                                        std::move(patterns));

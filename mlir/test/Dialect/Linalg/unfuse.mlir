@@ -317,3 +317,27 @@ func.func @unfuse_globalaveragepool2d(%ifm : tensor<1x2048x7x7xf32>) -> tensor<1
 
     return %result : tensor<1x2048x1x1xf32>
 }
+// CHECK: #map0 = affine_map<(d0, d1) -> (d1, d0)> 
+// CHECK: #map1 = affine_map<(d0, d1) -> (d0, d1)> 
+// CHECK: #map2 = affine_map<(d0, d1) -> (d1)> 
+// CHECK: func @unfuse_linear(
+// CHECK-SAME: %[[input:.+]]: tensor<1x2048xf32>, %[[weights:.+]]: tensor<1000x2048xf32>, %[[bias:.+]]: tensor<1000xf32>
+func.func @unfuse_linear(%input: tensor<1x2048xf32>, %weights: tensor<1000x2048xf32>, %bias: tensor<1000xf32>) -> tensor<1x1000xf32> {
+
+    %result = linalg.linear ins(%input: tensor<1x2048xf32>, %weights: tensor<1000x2048xf32>, %bias: tensor<1000xf32>) -> tensor<1x1000xf32>
+
+// CHECK:  %[[tweightshape:.+]] = linalg.init_tensor [2048, 1000] : tensor<2048x1000xf32>
+// CHECK:  %[[tweights:.+]] = linalg.generic {indexing_maps = [#map0, #map1], iterator_types = ["parallel", "parallel"]} ins(%[[weights]] : tensor<1000x2048xf32>) outs(%[[tweightshape]] : tensor<2048x1000xf32>) {
+// CHECK:  ^bb0(%[[a:.+]]: f32, %{{.+}}: f32):
+// CHECK:    linalg.yield %[[a]] : f32
+// CHECK:  } -> tensor<2048x1000xf32>
+// CHECK:  %[[bias2dshape:.+]] = linalg.init_tensor [1, 1000] : tensor<1x1000xf32>
+// CHECK:  %[[bias2d:.+]] = linalg.generic {indexing_maps = [#map2, #map1], iterator_types = ["parallel", "parallel"]} ins(%[[bias]] : tensor<1000xf32>) outs(%[[bias2dshape]] : tensor<1x1000xf32>) {
+// CHECK:  ^bb0(%[[b:.+]]: f32, %{{.+}}: f32):
+// CHECK:    linalg.yield %[[b]] : f32
+// CHECK:  } -> tensor<1x1000xf32>
+// CHECK:  %[[out:.+]] = linalg.matmul ins(%[[input]], %[[tweights]] : tensor<1x2048xf32>, tensor<2048x1000xf32>) outs(%[[bias2d]] : tensor<1x1000xf32>) -> tensor<1x1000xf32
+// CHECK: return %[[out]]
+
+    return %result : tensor<1x1000xf32>
+}
