@@ -20,11 +20,47 @@ func.func @unfuse_conv_2d_tensor_add(%ifm : tensor<1x1024x10x10xf32>, %summand :
     // CHECK: %[[biased:.+]] = linalg.broadcast_bias_2d_fchw
     // CHECK: %[[conv:.+]] = linalg.conv_2d_nchw_fchw
     // CHECK-SAME: ins(%[[ifm]], %[[weights]] :
-    // CHECK=SAME: outs(%[[biased]] :
+    // CHECK-SAME: outs(%[[biased]] :
     // CHECK: %[[out:.+]] = arith.addf %[[conv]], %[[summand]]
 
     // CHECK: return %[[out]]
     return %result : tensor<1x1024x8x8xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @unfuse_conv_2d_tensor_add_averagepool(
+// CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x10x10xf32>
+// CHECK-SAME: %[[summand:.+]]: tensor<1x1024x8x8xf32>
+func.func @unfuse_conv_2d_tensor_add_averagepool(%ifm : tensor<1x1024x10x10xf32>, %summand : tensor<1x1024x8x8xf32>) -> tensor<1x1024x1x1xf32> {
+    // CHECK-DAG: %[[cst:.+]] = arith.constant dense<0.000000e+00> : tensor<1x1024x1x1xf32>
+    %zero = arith.constant 0.0 : f32
+    // CHECK-DAG: %[[weights:.+]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
+    %weights = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
+    // CHECK-DAG: %[[bias:.+]] = arith.constant dense<3.000000e-01> : tensor<1024xf32>
+    %bias = arith.constant dense<3.000000e-01> : tensor<1024xf32>
+    // CHECK-DAG: %[[cst0:.+]] = arith.constant dense<6.400000e+01> : tensor<1x1024x1x1xf32>
+
+    %init = tensor.splat %zero : tensor<1x1024x1x1xf32>
+    %result = linalg.conv_2d_tensor_add_averagepool
+        {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>}
+        ins(%ifm, %summand, %weights, %bias : tensor<1x1024x10x10xf32>, tensor<1x1024x8x8xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>)
+        outs(%init : tensor<1x1024x1x1xf32>)
+        -> tensor<1x1024x1x1xf32>
+
+    // CHECK: %[[biased:.+]] = linalg.broadcast_bias_2d_fchw
+    // CHECK: %[[conv:.+]] = linalg.conv_2d_nchw_fchw
+    // CHECK-SAME: ins(%[[ifm]], %[[weights]] :
+    // CHECK-SAME: outs(%[[biased]] :
+    // CHECK: %[[add:.+]] = arith.addf %[[conv]], %[[summand]]
+    // CHECK: %[[init:.+]] = linalg.init_tensor
+    // CHECK: %[[pool:.+]] = linalg.pooling_nchw_sum
+    // CHECK-SAME: ins(%[[add]], %[[init]] :
+    // CHECK-SAME: outs(%[[cst]] :
+    // CHECK: %[[out:.+]] = arith.divf %[[pool]], %[[cst0]]
+
+    // CHECK: return %[[out]]
+    return %result : tensor<1x1024x1x1xf32>
 }
 
 // -----
@@ -92,6 +128,45 @@ func.func @unfuse_conv_2d_tensor_add_relu(%ifm : tensor<1x1024x17x17xf32>, %summ
 
     // CHECK: return %[[out]]
     return %result : tensor<1x1024x7x7xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @unfuse_conv_2d_tensor_add_relu_averagepool(
+// CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x10x10xf32>
+// CHECK-SAME: %[[summand:.+]]: tensor<1x1024x8x8xf32>
+func.func @unfuse_conv_2d_tensor_add_relu_averagepool(%ifm : tensor<1x1024x10x10xf32>, %summand : tensor<1x1024x8x8xf32>) -> tensor<1x1024x1x1xf32> {
+    // CHECK-DAG: %[[cst:.+]] = arith.constant dense<0.000000e+00> : tensor<1x1024x1x1xf32>
+    %zero = arith.constant 0.0 : f32
+    // CHECK-DAG: %[[weights:.+]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
+    %weights = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
+    // CHECK-DAG: %[[bias:.+]] = arith.constant dense<3.000000e-01> : tensor<1024xf32>
+    %bias = arith.constant dense<3.000000e-01> : tensor<1024xf32>
+    // CHECK-DAG: %[[cst0:.+]] = arith.constant dense<6.400000e+01> : tensor<1x1024x1x1xf32>
+
+    %init = tensor.splat %zero : tensor<1x1024x1x1xf32>
+    %result = linalg.conv_2d_tensor_add_relu_averagepool
+        {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>}
+        ins(%ifm, %summand, %weights, %bias : tensor<1x1024x10x10xf32>, tensor<1x1024x8x8xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>)
+        outs(%init : tensor<1x1024x1x1xf32>)
+        -> tensor<1x1024x1x1xf32>
+
+    // CHECK: %[[biased:.+]] = linalg.broadcast_bias_2d_fchw
+    // CHECK: %[[conv:.+]] = linalg.conv_2d_nchw_fchw
+    // CHECK-SAME: ins(%[[ifm]], %[[weights]] :
+    // CHECK-SAME: outs(%[[biased]] :
+    // CHECK: %[[add:.+]] = arith.addf %[[conv]], %[[summand]]
+    // CHECK: %[[relu:.+]] = linalg.relu_2d_nchw
+    // CHECK-SAME: ins(%[[add]] :
+    // CHECK-SAME: outs(%[[add]] :
+    // CHECK: %[[init:.+]] = linalg.init_tensor
+    // CHECK: %[[pool:.+]] = linalg.pooling_nchw_sum
+    // CHECK-SAME: ins(%[[relu]], %[[init]] :
+    // CHECK-SAME: outs(%[[cst]] :
+    // CHECK: %[[out:.+]] = arith.divf %[[pool]], %[[cst0]]
+
+    // CHECK: return %[[out]]
+    return %result : tensor<1x1024x1x1xf32>
 }
 
 // -----
@@ -165,6 +240,47 @@ func.func @unfuse_conv_2d_tensor_add_lrelu(%ifm : tensor<1x1024x15x15xf32>, %sum
 
     // CHECK: return %[[out]]
     return %result : tensor<1x1024x13x13xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @unfuse_conv_2d_tensor_add_relu_averagepool(
+// CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x10x10xf32>
+// CHECK-SAME: %[[summand:.+]]: tensor<1x1024x8x8xf32>
+func.func @unfuse_conv_2d_tensor_add_relu_averagepool(%ifm : tensor<1x1024x10x10xf32>, %summand : tensor<1x1024x8x8xf32>) -> tensor<1x1024x1x1xf32> {
+    // CHECK-DAG: %[[cst:.+]] = arith.constant dense<0.000000e+00> : tensor<1x1024x1x1xf32>
+    %zero = arith.constant 0.0 : f32
+    // CHECK-DAG: %[[weights:.+]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
+    %weights = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
+    // CHECK-DAG: %[[bias:.+]] = arith.constant dense<3.000000e-01> : tensor<1024xf32>
+    %bias = arith.constant dense<3.000000e-01> : tensor<1024xf32>
+    // CHECK-DAG: %[[alpha:.+]] = arith.constant 2.000000e-02 : f32
+    %alpha = arith.constant 2.000000e-02 : f32
+    // CHECK-DAG: %[[cst0:.+]] = arith.constant dense<6.400000e+01> : tensor<1x1024x1x1xf32>
+
+    %init = tensor.splat %zero : tensor<1x1024x1x1xf32>
+    %result = linalg.conv_2d_tensor_add_lrelu_averagepool
+        {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>}
+        ins(%ifm, %summand, %weights, %bias, %alpha : tensor<1x1024x10x10xf32>, tensor<1x1024x8x8xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>, f32)
+        outs(%init : tensor<1x1024x1x1xf32>)
+        -> tensor<1x1024x1x1xf32>
+
+    // CHECK: %[[biased:.+]] = linalg.broadcast_bias_2d_fchw
+    // CHECK: %[[conv:.+]] = linalg.conv_2d_nchw_fchw
+    // CHECK-SAME: ins(%[[ifm]], %[[weights]] :
+    // CHECK-SAME: outs(%[[biased]] :
+    // CHECK: %[[add:.+]] = arith.addf %[[conv]], %[[summand]]
+    // CHECK: %[[lrelu:.+]] = linalg.lrelu_2d_nchw
+    // CHECK-SAME: ins(%[[add]], %[[alpha]] :
+    // CHECK-SAME: outs(%[[add]] :
+    // CHECK: %[[init:.+]] = linalg.init_tensor
+    // CHECK: %[[pool:.+]] = linalg.pooling_nchw_sum
+    // CHECK-SAME: ins(%[[lrelu]], %[[init]] :
+    // CHECK-SAME: outs(%[[cst]] :
+    // CHECK: %[[out:.+]] = arith.divf %[[pool]], %[[cst0]]
+
+    // CHECK: return %[[out]]
+    return %result : tensor<1x1024x1x1xf32>
 }
 
 // -----
