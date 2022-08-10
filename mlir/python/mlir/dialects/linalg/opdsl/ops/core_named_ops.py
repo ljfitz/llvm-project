@@ -169,6 +169,34 @@ def broadcast_bias_2d_fchw(
   domain(D.b, D.f, D.oh, D.ow)
   OFM[D.b, D.f, D.oh, D.ow] = bias[D.f]
 
+@linalg_structured_op
+def broadcast_1d_to_2d(
+    input=TensorDef(T1, S.H),
+    output=TensorDef(T1,  S.W, S.H, output=True)):
+  """
+  Broadcast the input tensor from 1D to 2D
+  
+  Layout:
+    * Input: H
+    * Output: WH
+  """
+  domain(D.W, D.H)
+  output[D.W, D.H] = input[D.H]
+
+@linalg_structured_op
+def transpose2d(
+    input=TensorDef(T1, S.W, S.H),
+    output=TensorDef(T1,  S.H, S.W, output=True)):
+  """
+  Transposes the 2D input tensor
+  
+  Layout:
+    * Input: WH
+    * Output: HW
+  """
+  domain(D.W, D.H)
+  output[D.H, D.W] = input[D.W, D.H]
+
 # Standard linalg ops
 
 @linalg_structured_op
