@@ -29,10 +29,10 @@ func.func @unfuse_conv_2d_tensor_add(%ifm : tensor<1x1024x10x10xf32>, %summand :
 
 // -----
 
-// CHECK-LABEL: func @unfuse_conv_2d_tensor_add_averagepool(
+// CHECK-LABEL: func @unfuse_conv_2d_tensor_add_globalaveragepool(
 // CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x10x10xf32>
 // CHECK-SAME: %[[summand:.+]]: tensor<1x1024x8x8xf32>
-func.func @unfuse_conv_2d_tensor_add_averagepool(%ifm : tensor<1x1024x10x10xf32>, %summand : tensor<1x1024x8x8xf32>) -> tensor<1x1024x1x1xf32> {
+func.func @unfuse_conv_2d_tensor_add_globalaveragepool(%ifm : tensor<1x1024x10x10xf32>, %summand : tensor<1x1024x8x8xf32>) -> tensor<1x1024x1x1xf32> {
     // CHECK-DAG: %[[cst:.+]] = arith.constant dense<0.000000e+00> : tensor<1x1024x1x1xf32>
     %zero = arith.constant 0.0 : f32
     // CHECK-DAG: %[[weights:.+]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
@@ -42,7 +42,7 @@ func.func @unfuse_conv_2d_tensor_add_averagepool(%ifm : tensor<1x1024x10x10xf32>
     // CHECK-DAG: %[[cst0:.+]] = arith.constant dense<6.400000e+01> : tensor<1x1024x1x1xf32>
 
     %init = tensor.splat %zero : tensor<1x1024x1x1xf32>
-    %result = linalg.conv_2d_tensor_add_averagepool
+    %result = linalg.conv_2d_tensor_add_globalaveragepool
         {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>}
         ins(%ifm, %summand, %weights, %bias : tensor<1x1024x10x10xf32>, tensor<1x1024x8x8xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>)
         outs(%init : tensor<1x1024x1x1xf32>)
@@ -132,10 +132,10 @@ func.func @unfuse_conv_2d_tensor_add_relu(%ifm : tensor<1x1024x17x17xf32>, %summ
 
 // -----
 
-// CHECK-LABEL: func @unfuse_conv_2d_tensor_add_relu_averagepool(
+// CHECK-LABEL: func @unfuse_conv_2d_tensor_add_relu_globalaveragepool(
 // CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x10x10xf32>
 // CHECK-SAME: %[[summand:.+]]: tensor<1x1024x8x8xf32>
-func.func @unfuse_conv_2d_tensor_add_relu_averagepool(%ifm : tensor<1x1024x10x10xf32>, %summand : tensor<1x1024x8x8xf32>) -> tensor<1x1024x1x1xf32> {
+func.func @unfuse_conv_2d_tensor_add_relu_globalaveragepool(%ifm : tensor<1x1024x10x10xf32>, %summand : tensor<1x1024x8x8xf32>) -> tensor<1x1024x1x1xf32> {
     // CHECK-DAG: %[[cst:.+]] = arith.constant dense<0.000000e+00> : tensor<1x1024x1x1xf32>
     %zero = arith.constant 0.0 : f32
     // CHECK-DAG: %[[weights:.+]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
@@ -145,7 +145,7 @@ func.func @unfuse_conv_2d_tensor_add_relu_averagepool(%ifm : tensor<1x1024x10x10
     // CHECK-DAG: %[[cst0:.+]] = arith.constant dense<6.400000e+01> : tensor<1x1024x1x1xf32>
 
     %init = tensor.splat %zero : tensor<1x1024x1x1xf32>
-    %result = linalg.conv_2d_tensor_add_relu_averagepool
+    %result = linalg.conv_2d_tensor_add_relu_globalaveragepool
         {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>}
         ins(%ifm, %summand, %weights, %bias : tensor<1x1024x10x10xf32>, tensor<1x1024x8x8xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>)
         outs(%init : tensor<1x1024x1x1xf32>)
@@ -244,10 +244,10 @@ func.func @unfuse_conv_2d_tensor_add_lrelu(%ifm : tensor<1x1024x15x15xf32>, %sum
 
 // -----
 
-// CHECK-LABEL: func @unfuse_conv_2d_tensor_add_relu_averagepool(
+// CHECK-LABEL: func @unfuse_conv_2d_tensor_add_relu_globalaveragepool(
 // CHECK-SAME: %[[ifm:.+]]: tensor<1x1024x10x10xf32>
 // CHECK-SAME: %[[summand:.+]]: tensor<1x1024x8x8xf32>
-func.func @unfuse_conv_2d_tensor_add_relu_averagepool(%ifm : tensor<1x1024x10x10xf32>, %summand : tensor<1x1024x8x8xf32>) -> tensor<1x1024x1x1xf32> {
+func.func @unfuse_conv_2d_tensor_add_relu_globalaveragepool(%ifm : tensor<1x1024x10x10xf32>, %summand : tensor<1x1024x8x8xf32>) -> tensor<1x1024x1x1xf32> {
     // CHECK-DAG: %[[cst:.+]] = arith.constant dense<0.000000e+00> : tensor<1x1024x1x1xf32>
     %zero = arith.constant 0.0 : f32
     // CHECK-DAG: %[[weights:.+]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
@@ -259,7 +259,7 @@ func.func @unfuse_conv_2d_tensor_add_relu_averagepool(%ifm : tensor<1x1024x10x10
     // CHECK-DAG: %[[cst0:.+]] = arith.constant dense<6.400000e+01> : tensor<1x1024x1x1xf32>
 
     %init = tensor.splat %zero : tensor<1x1024x1x1xf32>
-    %result = linalg.conv_2d_tensor_add_lrelu_averagepool
+    %result = linalg.conv_2d_tensor_add_lrelu_globalaveragepool
         {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>}
         ins(%ifm, %summand, %weights, %bias, %alpha : tensor<1x1024x10x10xf32>, tensor<1x1024x8x8xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>, f32)
         outs(%init : tensor<1x1024x1x1xf32>)

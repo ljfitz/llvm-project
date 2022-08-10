@@ -210,8 +210,8 @@ def Linalg_GlobalAveragePool2DOp : Linalg_Op<"globalaveragepool2d", [NoSideEffec
   let hasVerifier = 1;
 }
 
-def Linalg_Conv2dTensorAddAveragePoolOp
-    : Linalg_Op<"conv_2d_tensor_add_averagepool", [NoSideEffect]> {
+def Linalg_Conv2dTensorAddGlobalAveragePoolOp
+    : Linalg_Op<"conv_2d_tensor_add_globalaveragepool", [NoSideEffect]> {
   let arguments = (ins AnyTensor:$I,
                        AnyTensor:$J,
                        AnyTensor:$K,
@@ -239,8 +239,8 @@ def Linalg_Conv2dTensorAddAveragePoolOp
   let hasVerifier = 1;
 }
 
-def Linalg_Conv2dTensorAddReluAveragePoolOp
-    : Linalg_Op<"conv_2d_tensor_add_relu_averagepool", [NoSideEffect]> {
+def Linalg_Conv2dTensorAddReluGlobalAveragePoolOp
+    : Linalg_Op<"conv_2d_tensor_add_relu_globalaveragepool", [NoSideEffect]> {
   let arguments = (ins AnyTensor:$I,
                        AnyTensor:$J,
                        AnyTensor:$K,
@@ -271,8 +271,8 @@ def Linalg_Conv2dTensorAddReluAveragePoolOp
   let hasVerifier = 1;
 }
 
-def Linalg_Conv2dTensorAddLreluAveragePoolOp
-    : Linalg_Op<"conv_2d_tensor_add_lrelu_averagepool", [NoSideEffect]> {
+def Linalg_Conv2dTensorAddLreluGlobalAveragePoolOp
+    : Linalg_Op<"conv_2d_tensor_add_lrelu_globalaveragepool", [NoSideEffect]> {
   let arguments = (ins AnyTensor:$I,
                        AnyTensor:$J,
                        AnyTensor:$K,

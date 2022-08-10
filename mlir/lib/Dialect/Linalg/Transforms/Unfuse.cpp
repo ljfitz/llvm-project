@@ -153,9 +153,9 @@ struct Conv2DTensorAddLowering : OpRewritePattern<Conv2DTensorAddOp> {
 };
 
 struct Conv2DTensorAddAveragePoolLowering
-    : OpRewritePattern<Conv2dTensorAddAveragePoolOp> {
-  using OpRewritePattern<Conv2dTensorAddAveragePoolOp>::OpRewritePattern;
-  LogicalResult matchAndRewrite(Conv2dTensorAddAveragePoolOp op,
+    : OpRewritePattern<Conv2dTensorAddGlobalAveragePoolOp> {
+  using OpRewritePattern<Conv2dTensorAddGlobalAveragePoolOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(Conv2dTensorAddGlobalAveragePoolOp op,
                                 PatternRewriter &rewriter) const override {
     // Sanity check: number of operands, none are optional!
     assert(op->getNumOperands() == 5 && "expected 5 operands");
@@ -237,9 +237,9 @@ struct Conv2DTensorAddReluLowering : OpRewritePattern<Conv2DTensorAddReluOp> {
 };
 
 struct Conv2DTensorAddReluAveragePoolLowering
-    : OpRewritePattern<Conv2dTensorAddReluAveragePoolOp> {
-  using OpRewritePattern<Conv2dTensorAddReluAveragePoolOp>::OpRewritePattern;
-  LogicalResult matchAndRewrite(Conv2dTensorAddReluAveragePoolOp op,
+    : OpRewritePattern<Conv2dTensorAddReluGlobalAveragePoolOp> {
+  using OpRewritePattern<Conv2dTensorAddReluGlobalAveragePoolOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(Conv2dTensorAddReluGlobalAveragePoolOp op,
                                 PatternRewriter &rewriter) const override {
     // Sanity check: number of operands, none are optional!
     assert(op->getNumOperands() == 5 && "expected 5 operands");
@@ -332,9 +332,9 @@ struct Conv2DTensorAddLreluLowering : OpRewritePattern<Conv2DTensorAddLreluOp> {
 };
 
 struct Conv2DTensorAddLreluAveragePoolLowering
-    : OpRewritePattern<Conv2dTensorAddLreluAveragePoolOp> {
-  using OpRewritePattern<Conv2dTensorAddLreluAveragePoolOp>::OpRewritePattern;
-  LogicalResult matchAndRewrite(Conv2dTensorAddLreluAveragePoolOp op,
+    : OpRewritePattern<Conv2dTensorAddLreluGlobalAveragePoolOp> {
+  using OpRewritePattern<Conv2dTensorAddLreluGlobalAveragePoolOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(Conv2dTensorAddLreluGlobalAveragePoolOp op,
                                 PatternRewriter &rewriter) const override {
     // Sanity check: number of operands, none are optional!
     assert(op->getNumOperands() == 6 && "expected 6 operands");

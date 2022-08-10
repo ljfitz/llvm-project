@@ -705,7 +705,7 @@ LogicalResult GlobalAveragePool2DOp::verify() {
 //===----------------------------------------------------------------------===//
 
 template <typename T>
-static LogicalResult verifyConv2dTensorAddAveragePoolOps(T compoundOp) {
+static LogicalResult verifyConv2dTensorAddGlobalAveragePoolOps(T compoundOp) {
   // 4 Inputs, 1 Output:
   //  I: input tensor to the convolution
   //  J: input tensor to the add. Is the result of a convolution and must
@@ -771,27 +771,27 @@ static LogicalResult verifyConv2dTensorAddAveragePoolOps(T compoundOp) {
   return success();
 }
 
-LogicalResult Conv2dTensorAddAveragePoolOp::verify() {
-  return verifyConv2dTensorAddAveragePoolOps(*this);
+LogicalResult Conv2dTensorAddGlobalAveragePoolOp::verify() {
+  return verifyConv2dTensorAddGlobalAveragePoolOps(*this);
 }
 
 //===----------------------------------------------------------------------===//
 // Conv2dTensorAddReluAveragePool
 //===----------------------------------------------------------------------===//
 
-LogicalResult Conv2dTensorAddReluAveragePoolOp::verify() {
-  return verifyConv2dTensorAddAveragePoolOps(*this);
+LogicalResult Conv2dTensorAddReluGlobalAveragePoolOp::verify() {
+  return verifyConv2dTensorAddGlobalAveragePoolOps(*this);
 }
 
 //===----------------------------------------------------------------------===//
 // Conv2dTensorAddLreluAveragePool
 //===----------------------------------------------------------------------===//
 
-LogicalResult Conv2dTensorAddLreluAveragePoolOp::verify() {
+LogicalResult Conv2dTensorAddLreluGlobalAveragePoolOp::verify() {
   auto alphaConst = alpha().getType().dyn_cast<Float32Type>();
   if (!alphaConst)
     return failure();
-  return verifyConv2dTensorAddAveragePoolOps(*this);
+  return verifyConv2dTensorAddGlobalAveragePoolOps(*this);
 }
 
 //===----------------------------------------------------------------------===//
