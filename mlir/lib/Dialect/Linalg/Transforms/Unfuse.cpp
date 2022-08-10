@@ -549,25 +549,6 @@ struct GlobalAveragePool2DLowering : OpRewritePattern<GlobalAveragePool2DOp> {
   }
 };
 
-Value createMappingOp(PatternRewriter &rewriter, Location loc,
-                      ArrayRef<AffineExpr> inputIndex, Value originalTensor,
-                      Value outputTensor, int64_t inputRank) {
-  SmallVector<StringRef> iteratorTypes(inputRank, "parallel");
-  SmallVector<AffineMap> indexMap = {
-      AffineMap::get(/*dimCount=*/inputRank, /*symbolCount=*/0, inputIndex,
-                     rewriter.getContext()),
-      rewriter.getMultiDimIdentityMap(inputRank)};
-  Value mappingOperator =
-      rewriter
-          .create<GenericOp>(loc, outputTensor.getType(), originalTensor,
-                             outputTensor, indexMap, iteratorTypes,
-                             [](OpBuilder &b, Location loc, ValueRange args) {
-                               b.create<linalg::YieldOp>(loc, args[0]);
-                             })
-          ->getResult(0);
-  return mappingOperator;
-}
-
 /// Torch MLIR does a similar lowering for their Linear operator to lin alg
 /// here we implement the same so we can run tests using the unfused version
 struct LinearLowering : OpRewritePattern<LinearOp> {
@@ -593,24 +574,23 @@ struct LinearLowering : OpRewritePattern<LinearOp> {
       return rewriter.notifyMatchFailure(op, "bias must be rank 1");
     }
 
-    // Create a generic linalg op that transposes the weights tensor
+    // Create a linalg op that transposes the weights tensor
     // The transposedWeights is simply used to describe the output shape.
     Value transposedWeights = rewriter.create<InitTensorOp>(
         loc,
         ArrayRef<int64_t>{weightsType.getShape()[1], weightsType.getShape()[0]},
         weightsType.getElementType());
-    Value transposeWeightsOp = createMappingOp(
-        rewriter, loc,
-        {rewriter.getAffineDimExpr(1), rewriter.getAffineDimExpr(0)}, weights,
-        transposedWeights, inputType.getRank());
+    Value transposeWeightsOp =
+        rewriter.create<Transpose2DOp>(loc, weights, transposedWeights)
+            ->getResult(0);
 
-    // Create a generic linalg op that broadcasts the 1D bias values across
+    // Create a linalg op that broadcasts the 1D bias values across
     // the 2nd dimension
     Value broadcastedBias = rewriter.create<InitTensorOp>(
         loc, outputType.getShape(), biasType.getElementType());
     Value broadcastBiasOp =
-        createMappingOp(rewriter, loc, {rewriter.getAffineDimExpr(1)}, bias,
-                        broadcastedBias, inputType.getRank());
+        rewriter.create<Broadcast1DTo2DOp>(loc, bias, broadcastedBias)
+            ->getResult(0);
 
     // Create the matmul operation that does the multiplcation and addition
     rewriter.replaceOpWithNewOp<MatmulOp>(op, output.getType(),
