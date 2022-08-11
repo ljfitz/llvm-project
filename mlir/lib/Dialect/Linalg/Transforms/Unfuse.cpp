@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "PassDetail.h"
+#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Passes.h"
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
@@ -21,6 +22,7 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/ImplicitLocOpBuilder.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
@@ -150,6 +152,32 @@ struct Conv2DTensorAddLowering : OpRewritePattern<Conv2DTensorAddOp> {
   }
 };
 
+struct Conv2DTensorAddAveragePoolLowering
+    : OpRewritePattern<Conv2dTensorAddGlobalAveragePoolOp> {
+  using OpRewritePattern<Conv2dTensorAddGlobalAveragePoolOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(Conv2dTensorAddGlobalAveragePoolOp op,
+                                PatternRewriter &rewriter) const override {
+    // Sanity check: number of operands, none are optional!
+    assert(op->getNumOperands() == 5 && "expected 5 operands");
+
+    // Unfuse the convolution
+    auto convResult = unfuse2DConvolution(
+        rewriter, op, /*ifm=*/op->getOperand(0),
+        /*weights=*/op->getOperand(2), /*bias=*/op->getOperand(3));
+
+    // Unfuse the add
+    Value addResult =
+        rewriter
+            .create<arith::AddFOp>(op->getLoc(), convResult, op->getOperand(1))
+            ->getResult(0);
+
+    // Unfuse the average pool
+    rewriter.replaceOpWithNewOp<linalg::GlobalAveragePool2DOp>(
+        op, op.getType(), addResult);
+    return success();
+  }
+};
+
 struct Conv2DReluLowering : OpRewritePattern<Conv2DReluOp> {
   using OpRewritePattern<Conv2DReluOp>::OpRewritePattern;
   LogicalResult matchAndRewrite(Conv2DReluOp op,
@@ -204,6 +232,37 @@ struct Conv2DTensorAddReluLowering : OpRewritePattern<Conv2DTensorAddReluOp> {
         /*inputs=*/addResult,
         /*outputs=*/addResult);
 
+    return success();
+  }
+};
+
+struct Conv2DTensorAddReluAveragePoolLowering
+    : OpRewritePattern<Conv2dTensorAddReluGlobalAveragePoolOp> {
+  using OpRewritePattern<Conv2dTensorAddReluGlobalAveragePoolOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(Conv2dTensorAddReluGlobalAveragePoolOp op,
+                                PatternRewriter &rewriter) const override {
+    // Sanity check: number of operands, none are optional!
+    assert(op->getNumOperands() == 5 && "expected 5 operands");
+
+    // Unfuse the convolution
+    auto convResult = unfuse2DConvolution(
+        rewriter, op, /*ifm=*/op->getOperand(0),
+        /*weights=*/op->getOperand(2), /*bias=*/op->getOperand(3));
+
+    // Unfuse the add
+    Value addResult =
+        rewriter
+            .create<arith::AddFOp>(op->getLoc(), convResult, op->getOperand(1))
+            ->getResult(0);
+
+    // Unfuse the ReLU
+    auto reluResult =
+        rewriter.create<Relu2DNchwOp>(op->getLoc(), addResult, addResult)
+            ->getResult(0);
+
+    // Unfuse the average pool
+    rewriter.replaceOpWithNewOp<linalg::GlobalAveragePool2DOp>(
+        op, op.getType(), reluResult);
     return success();
   }
 };
@@ -268,6 +327,38 @@ struct Conv2DTensorAddLreluLowering : OpRewritePattern<Conv2DTensorAddLreluOp> {
           /*outputs=*/addResult);
     }
 
+    return success();
+  }
+};
+
+struct Conv2DTensorAddLreluAveragePoolLowering
+    : OpRewritePattern<Conv2dTensorAddLreluGlobalAveragePoolOp> {
+  using OpRewritePattern<Conv2dTensorAddLreluGlobalAveragePoolOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(Conv2dTensorAddLreluGlobalAveragePoolOp op,
+                                PatternRewriter &rewriter) const override {
+    // Sanity check: number of operands, none are optional!
+    assert(op->getNumOperands() == 6 && "expected 6 operands");
+
+    // Unfuse the convolution
+    auto convResult = unfuse2DConvolution(
+        rewriter, op, /*ifm=*/op->getOperand(0),
+        /*weights=*/op->getOperand(2), /*bias=*/op->getOperand(3));
+
+    // Unfuse the add
+    Value addResult =
+        rewriter
+            .create<arith::AddFOp>(op->getLoc(), convResult, op->getOperand(1))
+            ->getResult(0);
+
+    // Unfuse the leaky ReLU
+    Value inputs[] = {addResult, op->getOperand(4)};
+    auto reluResult =
+        rewriter.create<Lrelu2DNchwOp>(op->getLoc(), inputs, addResult)
+            ->getResult(0);
+
+    // Unfuse the average pool
+    rewriter.replaceOpWithNewOp<linalg::GlobalAveragePool2DOp>(
+        op, op.getType(), reluResult);
     return success();
   }
 };
@@ -607,9 +698,11 @@ struct LinalgUnfusePass : public LinalgUnfuseBase<LinalgUnfusePass> {
 
     // BUG: Utterly fails for dynamic dimensions. Maybe reject patterns?
 
-    patterns.add<Conv2DTensorAddLowering, Conv2DReluLowering,
-                 Conv2DTensorAddReluLowering, Conv2DLreluOpLowering,
+    patterns.add<Conv2DTensorAddLowering, Conv2DTensorAddAveragePoolLowering,
+                 Conv2DReluLowering, Conv2DTensorAddReluLowering,
+                 Conv2DTensorAddReluAveragePoolLowering, Conv2DLreluOpLowering,
                  Conv2DTensorAddLreluLowering,
+                 Conv2DTensorAddLreluAveragePoolLowering,
                  Conv2DActivationMaxpoolOpLowering<Conv2DLreluMaxpoolOp>,
                  Conv2DActivationMaxpoolOpLowering<Conv2DReluMaxpoolOp>,
                  SoftmaxLowering, GlobalAveragePool2DLowering, LinearLowering>(
