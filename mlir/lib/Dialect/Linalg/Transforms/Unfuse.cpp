@@ -657,13 +657,9 @@ struct LinearLowering : OpRewritePattern<LinearOp> {
     auto biasType = bias.getType().cast<RankedTensorType>();
     auto outputType = output.getType().cast<RankedTensorType>();
 
-    if (inputType.getRank() != 2 || weightsType.getRank() != 2) {
-      return rewriter.notifyMatchFailure(op,
-                                         "input and weights must be rank 2");
-    }
-    if (biasType.getRank() != 1) {
-      return rewriter.notifyMatchFailure(op, "bias must be rank 1");
-    }
+    // Ensure inputs are of correct rank
+    assert(inputType.getRank() == 2 && weightsType.getRank() == 2 &&
+           "input and weights must be rank 2");
 
     // Create a linalg op that transposes the weights tensor
     // The transposedWeights is simply used to describe the output shape.
