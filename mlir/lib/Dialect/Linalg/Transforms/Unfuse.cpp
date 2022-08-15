@@ -640,6 +640,54 @@ struct GlobalAveragePool2DLowering : OpRewritePattern<GlobalAveragePool2DOp> {
   }
 };
 
+/// Torch MLIR does a similar lowering for their Linear operator to lin alg
+/// here we implement the same so we can run tests using the unfused version
+struct LinearLowering : OpRewritePattern<LinearOp> {
+  using OpRewritePattern<LinearOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(LinearOp op,
+                                PatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    Value input = op.input();
+    Value weights = op.weights();
+    Value bias = op.bias();
+    Value output = op->getResult(0);
+
+    auto inputType = input.getType().cast<RankedTensorType>();
+    auto weightsType = weights.getType().cast<RankedTensorType>();
+    auto biasType = bias.getType().cast<RankedTensorType>();
+    auto outputType = output.getType().cast<RankedTensorType>();
+
+    // Ensure inputs are of correct rank
+    assert(inputType.getRank() == 2 && weightsType.getRank() == 2 &&
+           "input and weights must be rank 2");
+
+    // Create a linalg op that transposes the weights tensor
+    // The transposedWeights is simply used to describe the output shape.
+    Value transposedWeights = rewriter.create<InitTensorOp>(
+        loc,
+        ArrayRef<int64_t>{weightsType.getShape()[1], weightsType.getShape()[0]},
+        weightsType.getElementType());
+    Value transposeWeightsOp =
+        rewriter.create<Transpose2DOp>(loc, weights, transposedWeights)
+            ->getResult(0);
+
+    // Create a linalg op that broadcasts the 1D bias values across
+    // the 2nd dimension
+    Value broadcastedBias = rewriter.create<InitTensorOp>(
+        loc, outputType.getShape(), biasType.getElementType());
+    Value broadcastBiasOp =
+        rewriter.create<Broadcast1DTo2DOp>(loc, bias, broadcastedBias)
+            ->getResult(0);
+
+    // Create the matmul operation that does the multiplcation and addition
+    rewriter.replaceOpWithNewOp<MatmulOp>(op, output.getType(),
+                                          ValueRange{input, transposeWeightsOp},
+                                          broadcastBiasOp);
+
+    return success();
+  }
+};
+
 struct LinalgUnfusePass : public LinalgUnfuseBase<LinalgUnfusePass> {
   void runOnOperation() override {
     RewritePatternSet patterns(&getContext());
@@ -653,7 +701,8 @@ struct LinalgUnfusePass : public LinalgUnfuseBase<LinalgUnfusePass> {
                  Conv2DTensorAddLreluAveragePoolLowering,
                  Conv2DActivationMaxpoolOpLowering<Conv2DLreluMaxpoolOp>,
                  Conv2DActivationMaxpoolOpLowering<Conv2DReluMaxpoolOp>,
-                 SoftmaxLowering, GlobalAveragePool2DLowering>(&getContext());
+                 SoftmaxLowering, GlobalAveragePool2DLowering, LinearLowering>(
+        &getContext());
 
     (void)applyPatternsAndFoldGreedily(getOperation().getBody(),
                                        std::move(patterns));

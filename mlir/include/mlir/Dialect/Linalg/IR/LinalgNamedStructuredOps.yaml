@@ -783,6 +783,75 @@ structured_op: !LinalgStructuredOpConfig
       scalar_arg: bias
 --- !LinalgOpConfig
 metadata: !LinalgOpMetadata
+  name: broadcast_1d_to_2d
+  cpp_class_name: Broadcast1DTo2DOp
+  doc: |-
+    Broadcast the input tensor from 1D to 2D assuming the
+    input tensor describes a single column.
+
+    Layout:
+      * Input: H
+      * Output: WH
+structured_op: !LinalgStructuredOpConfig
+  args:
+  - !LinalgOperandDefConfig
+    name: input
+    kind: input_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1] -> (s0)>
+  - !LinalgOperandDefConfig
+    name: output
+    kind: output_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1] -> (s1, s0)>
+  indexing_maps: !LinalgIndexingMapsConfig
+    static_indexing_maps:
+    - affine_map<(d0, d1)[s0, s1] -> (d1)>
+    - affine_map<(d0, d1)[s0, s1] -> (d0, d1)>
+  iterator_types:
+  - parallel
+  - parallel
+  assignments:
+  - !ScalarAssign
+    arg: output
+    value: !ScalarExpression
+      scalar_arg: input
+--- !LinalgOpConfig
+metadata: !LinalgOpMetadata
+  name: transpose2d
+  cpp_class_name: Transpose2DOp
+  doc: |-
+    Transposes the 2D input tensor
+
+    Layout:
+      * Input: WH
+      * Output: HW
+structured_op: !LinalgStructuredOpConfig
+  args:
+  - !LinalgOperandDefConfig
+    name: input
+    kind: input_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1] -> (s0, s1)>
+  - !LinalgOperandDefConfig
+    name: output
+    kind: output_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1] -> (s1, s0)>
+  indexing_maps: !LinalgIndexingMapsConfig
+    static_indexing_maps:
+    - affine_map<(d0, d1)[s0, s1] -> (d0, d1)>
+    - affine_map<(d0, d1)[s0, s1] -> (d1, d0)>
+  iterator_types:
+  - parallel
+  - parallel
+  assignments:
+  - !ScalarAssign
+    arg: output
+    value: !ScalarExpression
+      scalar_arg: input
+--- !LinalgOpConfig
+metadata: !LinalgOpMetadata
   name: copy
   cpp_class_name: CopyOp
   doc: |-
