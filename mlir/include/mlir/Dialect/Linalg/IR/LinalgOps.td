@@ -14,6 +14,7 @@
 #define LINALG_OPS
 
 include "mlir/Dialect/Linalg/IR/LinalgBase.td"
+include "mlir/Dialect/Linalg/IR/LinalgInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
 include "mlir/Interfaces/LoopLikeInterface.td"
@@ -189,6 +190,219 @@ def Linalg_IndexOp : Linalg_Op<"index", [NoSideEffect]>,
 
   let assemblyFormat = [{ $dim attr-dict `:` type($result) }];
   let hasVerifier = 1;
+}
+
+def Linalg_SoftmaxOp : Linalg_Op<"softmax", [NoSideEffect]> {
+  let arguments = (ins AnyTensor:$input,
+                       I64Attr:$dim);
+  let results = (outs AnyTensor:$result);
+  let summary = "linalg softmax operation";
+  let description = [{
+    This implements the softmax operator.
+  }];
+  let assemblyFormat = [{ attr-dict `ins``(` $input `:` type($input)`)` `->` type(results) }];
+  let hasVerifier = 1;
+}
+
+def Linalg_GlobalAveragePool2DOp : Linalg_Op<"globalaveragepool2d", [NoSideEffect]> {
+  let arguments = (ins AnyTensor:$input);
+  let results = (outs AnyTensor:$result);
+  let summary = "linalg globalaveragepool2d operation";
+  let description = [{
+    This implements the globalaveragepool2d operator.
+    The custom op is unfused into `linalg.pooling_nchw_sum` and `arith.divf`.
+  }];
+  let assemblyFormat = [{ attr-dict `ins``(` $input `:` type($input)`)` `->` type(results) }];
+  let hasVerifier = 1;
+}
+
+def Linalg_Conv2dTensorAddGlobalAveragePoolOp
+    : Linalg_Op<"conv_2d_tensor_add_globalaveragepool", [NoSideEffect]> {
+  let arguments = (ins AnyTensor:$I,
+                       AnyTensor:$J,
+                       AnyTensor:$K,
+                       AnyTensor:$B,
+                       AnyTensor:$O,
+                       AnyIntElementsAttr:$strides,
+                       AnyIntElementsAttr:$dilations
+  );
+  let results = (outs AnyTensor:$result);
+  let summary = "Conv2D + Tensor-Add + GlobalAveragePool compound operation";
+  let description = [{
+    Performs fused 2-D convolution, elementwise add and global average pool.
+
+    Layout:
+      * Input: NCHW
+      * Kernel: FCHW
+  }];
+  let assemblyFormat = [{
+    attr-dict
+    `ins``(` $I`,` $J`,` $K`,` $B
+      `:` type($I)`,` type($J)`,` type($K)`,` type($B)`)`
+    `outs``(` $O `:` type($O)`)`
+    `->` type(results)
+  }];
+  let hasVerifier = 1;
+}
+
+def Linalg_Conv2dTensorAddReluGlobalAveragePoolOp
+    : Linalg_Op<"conv_2d_tensor_add_relu_globalaveragepool", [NoSideEffect]> {
+  let arguments = (ins AnyTensor:$I,
+                       AnyTensor:$J,
+                       AnyTensor:$K,
+                       AnyTensor:$B,
+                       AnyTensor:$O,
+                       AnyIntElementsAttr:$strides,
+                       AnyIntElementsAttr:$dilations
+  );
+  let results = (outs AnyTensor:$result);
+  let summary = [{
+    Conv2D + Tensor-Add + ReLU + GlobalAveragePool compound operation
+  }];
+  let description = [{
+    Performs fused 2-D convolution, elementwise add, ReLU and global average
+    pool.
+
+    Layout:
+      * Input: NCHW
+      * Kernel: FCHW
+  }];
+  let assemblyFormat = [{
+    attr-dict
+    `ins``(` $I`,` $J`,` $K`,` $B
+      `:` type($I)`,` type($J)`,` type($K)`,` type($B)`)`
+    `outs``(` $O `:` type($O)`)`
+    `->` type(results)
+  }];
+  let hasVerifier = 1;
+}
+
+def Linalg_Conv2dTensorAddLreluGlobalAveragePoolOp
+    : Linalg_Op<"conv_2d_tensor_add_lrelu_globalaveragepool", [NoSideEffect]> {
+  let arguments = (ins AnyTensor:$I,
+                       AnyTensor:$J,
+                       AnyTensor:$K,
+                       AnyTensor:$B,
+                       F32:$alpha,
+                       AnyTensor:$O,
+                       AnyIntElementsAttr:$strides,
+                       AnyIntElementsAttr:$dilations
+  );
+  let results = (outs AnyTensor:$result);
+  let summary = [{
+    Conv2D + Tensor-Add + LeakyReLU + GlobalAveragePool compound operation
+  }];
+  let description = [{
+    Performs fused 2-D convolution, elementwise add, LeakyReLU and global
+    average pool.
+
+    Layout:
+      * Input: NCHW
+      * Kernel: FCHW
+  }];
+  let assemblyFormat = [{
+    attr-dict
+    `ins``(` $I`,` $J`,` $K`,` $B`,` $alpha
+      `:` type($I)`,` type($J)`,` type($K)`,` type($B)`,` type($alpha)`)`
+    `outs``(` $O `:` type($O)`)`
+    `->` type(results)
+  }];
+  let hasVerifier = 1;
+}
+
+def Linalg_LinearOp : Linalg_Op<"linear", [NoSideEffect]> {
+  let arguments = (
+    ins AnyTensor:$input, 
+        AnyTensor:$weights, 
+        AnyTensor:$bias
+    );
+  let results = (outs AnyTensor:$result);
+  let summary = "linalg linear operation (y=A*B^T+C)";
+  let description = [{
+    The following custom operator implements the linear operator y=A*B^T+C.
+    Remember, C is broadcastable, therefore it is of rank 1.
+    Linear can be decomposed into two generic linalg operators one broadcasting
+    C into 2D tensor, the other transposing the weights. With a linalg matmul
+    consuming the input tensor, transposed weights and the broadcasted C tensor.
+  }];
+  let assemblyFormat = [{ attr-dict `ins``(` $input `:` type($input)`,` $weights `:` type($weights)`,` $bias `:` type($bias) `)` `->` type(results) }];
+  let hasVerifier = 1;
+}
+
+def Linalg_FusedOp
+    : Linalg_Op<"fused", [
+        IsolatedFromAbove,
+        DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+        DeclareOpInterfaceMethods<LinalgOperatorClassInterface>,
+        DeclareOpInterfaceMethods<
+          RegionBranchOpInterface, [
+            "getSuccessorEntryOperands",
+            "getNumRegionInvocations",
+            "getRegionInvocationBounds"]>,
+        SingleBlockImplicitTerminator<"YieldOp">]> {
+  let summary = "Fused operator region";
+  let description = [{
+    The `linalg.fused` operation declares a single block that collects
+    operations that produce a tensor value in a single fused loop nest, with
+    all intermediary values being buffered internally and/or scalar replaced.
+
+    All values used within this block must be explicitly captured.
+
+    This operation also supports buffered semantics, where no value will be
+    returned, and all side-effects are expected to be mediated through captured
+    memrefs.
+
+    Example:
+
+    ```mlir
+    %0 = ... : tensor<1x3x108x108xf32>
+    %1 = linalg.fused (%ifm = %0 : tensor<1x3x108x108xf32>) {
+      %0 = linalg.conv2d_nchw ins(%ifm: ...
+      %1 = linalg.relu2d_nchw ins(%0: ...
+      linalg.yield %1 : tensor<1x3x106x106xf32>
+    } -> tensor<1x3x106x106xf32>
+    ```
+  }];
+
+  let arguments = (ins Variadic<AnyType>:$captures);
+  let results = (outs Optional<AnyRankedTensor>:$result);
+  let regions = (region SizedRegion<1>:$body);
+
+  let hasCustomAssemblyFormat = 1;
+  let hasVerifier = 1;
+  let hasCanonicalizer = 1;
+
+  let builders = [
+    OpBuilder<(ins
+      "Type":$resultType,
+      "ValueRange":$captures,
+      CArg<"function_ref<void(OpBuilder &, Location, BlockAndValueMapping &)>", "nullptr">:$bodyBuilder)>,
+    OpBuilder<(ins
+      "ValueRange":$captures,
+      CArg<"function_ref<void(OpBuilder &, Location, BlockAndValueMapping &)>", "nullptr">:$bodyBuilder)>
+  ];
+  let skipDefaultBuilders = 1;
+
+  code extraClassDeclaration = [{
+    Block::BlockArgListType getCaptureArgs() {
+      return getBody()->getArguments();
+    }
+
+    BlockAndValueMapping getCaptureMapping() {
+      BlockAndValueMapping result;
+      for (unsigned idx = 0; idx < captures().size(); ++idx) {
+        result.map(captures()[idx], getCaptureArgs()[idx]);
+      }
+      return result;
+    }
+    BlockAndValueMapping getUnCaptureMapping() {
+      BlockAndValueMapping result;
+      for (unsigned idx = 0; idx < captures().size(); ++idx) {
+        result.map(getCaptureArgs()[idx], captures()[idx]);
+      }
+      return result;
+    }
+  }];
 }
 
 #endif // LINALG_OPS
