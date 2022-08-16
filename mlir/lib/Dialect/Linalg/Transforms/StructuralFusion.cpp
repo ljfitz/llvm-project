@@ -139,7 +139,7 @@ static FusedOp wrapInFusedOp(Operation *target) {
 
 /// Determines whether @p target contains wrapped op that can be unwrapped.
 static bool canUnwrapFusedOp(FusedOp target) {
-  auto body = target.getBody();
+  auto body = target.getBody().begin();
 
   // - exactly one wrapped op must be contained (plus terminator)
   if (body->getOperations().size() != 2)
@@ -167,7 +167,7 @@ static Operation *unwrapFusedOp(FusedOp target) {
   // Clone the wrapped op out of the FusedOp.
   OpBuilder builder(target);
   auto unwrapped = builder.insert(
-      target.getBody()->getOperations().front().clone(unCaptureMapping));
+      target.getBody().begin()->getOperations().front().clone(unCaptureMapping));
 
   // Remove the target operation
   target.replaceAllUsesWith(unwrapped);
@@ -279,7 +279,7 @@ static FusedOp fuseProducer(FusedOp target, Operation *producer) {
         }
 
         // Clone the contents of the old body.
-        for (auto &op : *target.getBody()) {
+        for (auto &op : target.getBody().front()) {
           builder.insert(op.clone(captures));
         }
       });
@@ -385,12 +385,12 @@ static FusedOp fuseConsumer(FusedOp target, Operation *consumer) {
         }
 
         // Clone the contents of the old body (without the terminator).
-        for (auto &op : target.getBody()->without_terminator()) {
+        for (auto &op : target.getBody().begin()->without_terminator()) {
           builder.insert(op.clone(captures));
         }
 
         // If the old fused op had a result, add it to the mapping.
-        auto terminator = target.getBody()->getTerminator();
+        auto terminator = target.getBody().begin()->getTerminator();
         if (terminator->getNumOperands())
           captures.map(target.result(),
                        captures.lookup(terminator->getOperand(0)));
@@ -447,7 +447,7 @@ static FailureOr<Tactic> parseTactic(StringRef string) {
     return failure();
 
   auto method = symbolize(methodStr);
-  if (!method.hasValue())
+  if (!method.has_value())
     return failure();
 
   auto [filterStr, rest] = tail.split(')');

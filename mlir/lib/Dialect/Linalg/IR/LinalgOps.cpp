@@ -859,7 +859,7 @@ void FusedOp::print(OpAsmPrinter &p) {
 ParseResult FusedOp::parse(OpAsmParser &p, OperationState &state) {
   SmallVector<OpAsmParser::UnresolvedOperand> captures;
   SmallVector<Type> captureTypes;
-  SmallVector<OpAsmParser::UnresolvedOperand> captureArgs;
+  SmallVector<OpAsmParser::Argument> captureArgs;
 
   // (%arg0 = %capture0 : type, ...)
   if (p.parseAssignmentList(captureArgs, captures))
@@ -872,8 +872,7 @@ ParseResult FusedOp::parse(OpAsmParser &p, OperationState &state) {
     return failure();
 
   // { ... }
-  if (p.parseRegion(*state.addRegion(), captureArgs, captureTypes,
-                    ArrayRef<Location>{}, true))
+  if (p.parseRegion(*state.addRegion(), captureArgs, true))
     return failure();
 
   // -> type
@@ -900,7 +899,7 @@ LogicalResult FusedOp::verify() {
   // NOTE: Because we don't implement the LinalgOp interface, we need to do this
   //       ourselves.
 
-  auto yield = cast<YieldOp>(getBody()->getTerminator());
+  auto yield = cast<YieldOp>(getBody().begin()->getTerminator());
 
   // Check that the yield matches the result declaration.
   if (yield.getNumOperands() != (result() ? 1 : 0))
@@ -991,8 +990,8 @@ struct DropUnusedResult : OpRewritePattern<FusedOp> {
     auto newOp = rewriter.create<FusedOp>(op.getLoc(), op.captures());
     BlockAndValueMapping removedArgs;
     op.body().cloneInto(&newOp.getBodyRegion(), removedArgs);
-    rewriter.setInsertionPointToEnd(newOp.getBody());
-    rewriter.replaceOpWithNewOp<YieldOp>(newOp.getBody()->getTerminator());
+    rewriter.setInsertionPointToEnd(&newOp.getBody().front());
+    rewriter.replaceOpWithNewOp<YieldOp>(newOp.getBody().begin()->getTerminator());
     rewriter.eraseOp(op);
 
     return success();
@@ -1004,8 +1003,8 @@ struct EraseEmptyFusedOp : OpRewritePattern<FusedOp> {
 
   LogicalResult matchAndRewrite(FusedOp op,
                                 PatternRewriter &rewriter) const override {
-    auto terminator = op.getBody()->getTerminator();
-    if (terminator != &op.getBody()->front())
+    auto terminator = op.getBody().begin()->getTerminator();
+    if (terminator != &op.getBody().begin()->front())
       return failure();
 
     if (terminator->getNumOperands() == 0) {
@@ -1042,12 +1041,12 @@ void FusedOp::getEffects(SmallVectorImpl<MemoryEffect> &effects) {
 
   // Preprare to collect side-effects for all captured arguments.
   DenseMap<Value, ArgEffect> argEffects;
-  for (auto idx = 0UL; idx < getBody()->getNumArguments(); ++idx) {
-    argEffects.try_emplace(getBody()->getArgument(idx), captures()[idx]);
+  for (auto idx = 0UL; idx < getBody().begin()->getNumArguments(); ++idx) {
+    argEffects.try_emplace(getBody().begin()->getArgument(idx), captures()[idx]);
   }
 
   // Collect all side-effects on captured arguments.
-  for (auto &op : *getBody()) {
+  for (auto &op : getBody().front()) {
     auto sideEffectInterface = dyn_cast<MemoryEffectOpInterface>(op);
     if (!sideEffectInterface)
       continue;
@@ -1072,8 +1071,8 @@ void FusedOp::getEffects(SmallVectorImpl<MemoryEffect> &effects) {
   }
 }
 
-OperandRange FusedOp::getSuccessorEntryOperands(unsigned index) {
-  assert(index == 0 && "invalid region index");
+OperandRange FusedOp::getSuccessorEntryOperands(Optional<unsigned> index) {
+  assert(index.getValue() == 0 && "invalid region index");
 
   // The body takes the captured values.
   return captures();
@@ -1082,7 +1081,7 @@ OperandRange FusedOp::getSuccessorEntryOperands(unsigned index) {
 void FusedOp::getSuccessorRegions(Optional<unsigned> index,
                                   ArrayRef<Attribute> operands,
                                   SmallVectorImpl<RegionSuccessor> &regions) {
-  if (index.hasValue()) {
+  if (index.has_value()) {
     assert(index.getValue() == 0 && "invalid region index");
 
     // The body branches back to the parent.

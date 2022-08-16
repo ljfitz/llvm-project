@@ -441,10 +441,10 @@ struct Conv2DActivationMaxpoolOpLowering : OpRewritePattern<T> {
 
       // Insert the body.
       OpBuilder::InsertionGuard guard(rewriter);
-      auto &region = padOp.region();
+      auto &region = padOp.getRegion().front();
       SmallVector<Type, 4> argTypes(4, rewriter.getIndexType());
       SmallVector<Location, 4> argLocs(4, op.getLoc());
-      rewriter.createBlock(&region, region.end(), argTypes, argLocs);
+      rewriter.createBlock(&region, argTypes, argLocs);
       rewriter.create<tensor::YieldOp>(
           op.getLoc(),
           rewriter.create<arith::ConstantOp>(op.getLoc(), padValue));

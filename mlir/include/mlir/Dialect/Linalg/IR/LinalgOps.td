@@ -16,6 +16,7 @@
 include "mlir/Dialect/Linalg/IR/LinalgBase.td"
 include "mlir/Dialect/Linalg/IR/LinalgInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
+include "mlir/IR/RegionKindInterface.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
 include "mlir/Interfaces/LoopLikeInterface.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
@@ -385,9 +386,8 @@ def Linalg_FusedOp
 
   code extraClassDeclaration = [{
     Block::BlockArgListType getCaptureArgs() {
-      return getBody()->getArguments();
+      return getBody().begin()->getArguments();
     }
-
     BlockAndValueMapping getCaptureMapping() {
       BlockAndValueMapping result;
       for (unsigned idx = 0; idx < captures().size(); ++idx) {
