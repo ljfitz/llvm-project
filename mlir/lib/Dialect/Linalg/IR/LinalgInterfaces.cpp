@@ -862,8 +862,8 @@ FailureOr<OperatorClass> mlir::linalg::parseOperatorClass(StringRef str) {
 
   if (!str.startswith("[")) {
     auto result = symbolize(str);
-    if (result.hasValue())
-      return result.getValue();
+    if (result.has_value())
+      return result.value();
 
     return failure();
   }
@@ -876,10 +876,10 @@ FailureOr<OperatorClass> mlir::linalg::parseOperatorClass(StringRef str) {
   auto split = str.split(',');
   do {
     const auto item = symbolize(split.first.trim());
-    if (!item.hasValue())
+    if (!item.has_value())
       return failure();
 
-    result |= item.getValue();
+    result |= item.value();
     split = str.split(',');
   } while (!split.second.empty());
 

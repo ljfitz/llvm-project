@@ -859,10 +859,10 @@ void FusedOp::print(OpAsmPrinter &p) {
 ParseResult FusedOp::parse(OpAsmParser &p, OperationState &state) {
   SmallVector<OpAsmParser::UnresolvedOperand> captures;
   SmallVector<Type> captureTypes;
-  SmallVector<OpAsmParser::UnresolvedOperand> captureArgs;
+  SmallVector<OpAsmParser::Argument> captureArgs;
 
   // (%arg0 = %capture0 : type, ...)
-  if (p.parseAssignmentListWithTypes(captureArgs, captures, captureTypes))
+  if (p.parseAssignmentList(captureArgs, captures))
     return failure();
   if (p.resolveOperands(captures, captureTypes, p.getNameLoc(), state.operands))
     return failure();
@@ -872,8 +872,7 @@ ParseResult FusedOp::parse(OpAsmParser &p, OperationState &state) {
     return failure();
 
   // { ... }
-  if (p.parseRegion(*state.addRegion(), captureArgs, captureTypes,
-                    ArrayRef<Location>{}, true))
+  if (p.parseRegion(*state.addRegion(), captureArgs, true))
     return failure();
 
   // -> type
@@ -900,7 +899,7 @@ LogicalResult FusedOp::verify() {
   // NOTE: Because we don't implement the LinalgOp interface, we need to do this
   //       ourselves.
 
-  auto yield = cast<YieldOp>(getBody()->getTerminator());
+  auto yield = cast<YieldOp>(getBody().front().getTerminator());
 
   // Check that the yield matches the result declaration.
   if (yield.getNumOperands() != (result() ? 1 : 0))
@@ -991,8 +990,8 @@ struct DropUnusedResult : OpRewritePattern<FusedOp> {
     auto newOp = rewriter.create<FusedOp>(op.getLoc(), op.captures());
     BlockAndValueMapping removedArgs;
     op.body().cloneInto(&newOp.getBodyRegion(), removedArgs);
-    rewriter.setInsertionPointToEnd(newOp.getBody());
-    rewriter.replaceOpWithNewOp<YieldOp>(newOp.getBody()->getTerminator());
+    rewriter.setInsertionPointToEnd(&newOp.getBody().front());
+    rewriter.replaceOpWithNewOp<YieldOp>(newOp.getBody().front().getTerminator());
     rewriter.eraseOp(op);
 
     return success();
@@ -1004,8 +1003,8 @@ struct EraseEmptyFusedOp : OpRewritePattern<FusedOp> {
 
   LogicalResult matchAndRewrite(FusedOp op,
                                 PatternRewriter &rewriter) const override {
-    auto terminator = op.getBody()->getTerminator();
-    if (terminator != &op.getBody()->front())
+    auto terminator = op.getBody().front().getTerminator();
+    if (terminator != &op.getBody().front().getOperations().front())
       return failure();
 
     if (terminator->getNumOperands() == 0) {
@@ -1042,12 +1041,12 @@ void FusedOp::getEffects(SmallVectorImpl<MemoryEffect> &effects) {
 
   // Preprare to collect side-effects for all captured arguments.
   DenseMap<Value, ArgEffect> argEffects;
-  for (auto idx = 0UL; idx < getBody()->getNumArguments(); ++idx) {
-    argEffects.try_emplace(getBody()->getArgument(idx), captures()[idx]);
+  for (auto idx = 0UL; idx < getBody().getNumArguments(); ++idx) {
+    argEffects.try_emplace(getBody().getArgument(idx), captures()[idx]);
   }
 
   // Collect all side-effects on captured arguments.
-  for (auto &op : *getBody()) {
+  for (auto &op : getBody().front()) {
     auto sideEffectInterface = dyn_cast<MemoryEffectOpInterface>(op);
     if (!sideEffectInterface)
       continue;
@@ -1072,8 +1071,8 @@ void FusedOp::getEffects(SmallVectorImpl<MemoryEffect> &effects) {
   }
 }
 
-OperandRange FusedOp::getSuccessorEntryOperands(unsigned index) {
-  assert(index == 0 && "invalid region index");
+OperandRange FusedOp::getSuccessorEntryOperands(Optional<unsigned> index) {
+  assert(index.value() == 0 && "invalid region index");
 
   // The body takes the captured values.
   return captures();
@@ -1082,8 +1081,8 @@ OperandRange FusedOp::getSuccessorEntryOperands(unsigned index) {
 void FusedOp::getSuccessorRegions(Optional<unsigned> index,
                                   ArrayRef<Attribute> operands,
                                   SmallVectorImpl<RegionSuccessor> &regions) {
-  if (index.hasValue()) {
-    assert(index.getValue() == 0 && "invalid region index");
+  if (index.has_value()) {
+    assert(index.value() == 0 && "invalid region index");
 
     // The body branches back to the parent.
     regions.push_back(RegionSuccessor(getResults()));

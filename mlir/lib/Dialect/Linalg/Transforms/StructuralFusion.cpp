@@ -139,7 +139,7 @@ static FusedOp wrapInFusedOp(Operation *target) {
 
 /// Determines whether @p target contains wrapped op that can be unwrapped.
 static bool canUnwrapFusedOp(FusedOp target) {
-  auto body = target.getBody();
+  auto body = &target.getBody().front();
 
   // - exactly one wrapped op must be contained (plus terminator)
   if (body->getOperations().size() != 2)
@@ -167,7 +167,7 @@ static Operation *unwrapFusedOp(FusedOp target) {
   // Clone the wrapped op out of the FusedOp.
   OpBuilder builder(target);
   auto unwrapped = builder.insert(
-      target.getBody()->getOperations().front().clone(unCaptureMapping));
+      target.getBody().front().getOperations().front().clone(unCaptureMapping));
 
   // Remove the target operation
   target.replaceAllUsesWith(unwrapped);
@@ -279,7 +279,7 @@ static FusedOp fuseProducer(FusedOp target, Operation *producer) {
         }
 
         // Clone the contents of the old body.
-        for (auto &op : *target.getBody()) {
+        for (auto &op : target.getBody().front()) {
           builder.insert(op.clone(captures));
         }
       });
@@ -385,12 +385,12 @@ static FusedOp fuseConsumer(FusedOp target, Operation *consumer) {
         }
 
         // Clone the contents of the old body (without the terminator).
-        for (auto &op : target.getBody()->without_terminator()) {
+        for (auto &op : target.getBody().front().without_terminator()) {
           builder.insert(op.clone(captures));
         }
 
         // If the old fused op had a result, add it to the mapping.
-        auto terminator = target.getBody()->getTerminator();
+        auto terminator = target.getBody().front().getTerminator();
         if (terminator->getNumOperands())
           captures.map(target.result(),
                        captures.lookup(terminator->getOperand(0)));
@@ -447,7 +447,7 @@ static FailureOr<Tactic> parseTactic(StringRef string) {
     return failure();
 
   auto method = symbolize(methodStr);
-  if (!method.hasValue())
+  if (!method.has_value())
     return failure();
 
   auto [filterStr, rest] = tail.split(')');
@@ -463,7 +463,7 @@ static FailureOr<Tactic> parseTactic(StringRef string) {
       return failure();
   }
 
-  return Tactic{method.getValue(), filter.getValue()};
+  return Tactic{method.value(), filter.value()};
 }
 
 static FailureOr<Strategy> parseStrategy(ArrayRef<std::string> tactics) {
@@ -472,7 +472,7 @@ static FailureOr<Strategy> parseStrategy(ArrayRef<std::string> tactics) {
     auto parsed = parseTactic(tactic);
     if (failed(parsed))
       return failure();
-    result.push_back(parsed.getValue());
+    result.push_back(parsed.value());
   }
   return std::move(result);
 }
@@ -490,7 +490,7 @@ struct LinalgStructuralFusionPass
           return;
         }
 
-        strategy = std::move(parsed.getValue());
+        strategy = std::move(parsed.value());
       } else {
         static Strategy defaultStrategy;
         if (defaultStrategy.empty()) {
@@ -554,7 +554,7 @@ struct LinalgStructuralFusionPass
       }
     }
 
-    apply(strategy.getValue());
+    apply(strategy.value());
   }
 
 private:
@@ -639,7 +639,7 @@ private:
     while (true) {
       auto fused = fuseFirstProducer(target, filter);
       if (succeeded(fused)) {
-        target = fused.getValue();
+        target = fused.value();
         result = true;
         continue;
       }
@@ -658,7 +658,7 @@ private:
       if (failed(fused))
         return false;
 
-      results.push_back(fused.getValue());
+      results.push_back(fused.value());
       return true;
     });
     work.append(results);
@@ -706,7 +706,7 @@ private:
       if (failed(fused))
         return false;
 
-      results.push_back(fused.getValue());
+      results.push_back(fused.value());
       return true;
     });
     work.append(results);

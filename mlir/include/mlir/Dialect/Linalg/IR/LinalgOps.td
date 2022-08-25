@@ -385,7 +385,7 @@ def Linalg_FusedOp
 
   code extraClassDeclaration = [{
     Block::BlockArgListType getCaptureArgs() {
-      return getBody()->getArguments();
+      return getBody().getArguments();
     }
 
     BlockAndValueMapping getCaptureMapping() {
