@@ -786,8 +786,7 @@ metadata: !LinalgOpMetadata
   name: broadcast_1d_to_2d
   cpp_class_name: Broadcast1DTo2DOp
   doc: |-
-    Broadcast the input tensor from 1D to 2D assuming the
-    input tensor describes a single column.
+    Broadcast the input tensor from 1D to 2D
 
     Layout:
       * Input: H
@@ -955,6 +954,8 @@ metadata: !LinalgOpMetadata
     Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
     is incorrect. Implementation of correct conv_2d_tensor_add functionality. Current
     inner loop functionality is a dummy implementation
+  implements:
+  - LinalgConvolutionOpInterface
 structured_op: !LinalgStructuredOpConfig
   args:
   - !LinalgOperandDefConfig
@@ -1093,6 +1094,8 @@ metadata: !LinalgOpMetadata
     Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
     is incorrect. Implementation of correct conv_2d_tensor_add_relu functionality. Current
     inner loop functionality is a dummy implementation
+  implements:
+  - LinalgConvolutionOpInterface
 structured_op: !LinalgStructuredOpConfig
   args:
   - !LinalgOperandDefConfig
@@ -1231,6 +1234,8 @@ metadata: !LinalgOpMetadata
     Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
     is incorrect. Implementation of correct conv_2d_tensor_add_lrelu functionality. Current
     inner loop functionality is a dummy implementation
+  implements:
+  - LinalgConvolutionOpInterface
 structured_op: !LinalgStructuredOpConfig
   args:
   - !LinalgOperandDefConfig

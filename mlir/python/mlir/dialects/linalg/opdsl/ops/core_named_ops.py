@@ -244,6 +244,7 @@ def conv_2d_tensor_add(
   is incorrect. Implementation of correct conv_2d_tensor_add functionality. Current
   inner loop functionality is a dummy implementation
   """
+  implements(ConvolutionOpInterface)
   domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw)
   O[D.n, D.f, D.oh, D.ow] += BinaryFn.add(TypeFn.cast_signed(U, B[D.f]) + TypeFn.cast_signed(
       U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH,
@@ -271,6 +272,7 @@ def conv_2d_tensor_add_relu(
   is incorrect. Implementation of correct conv_2d_tensor_add_relu functionality. Current
   inner loop functionality is a dummy implementation
   """
+  implements(ConvolutionOpInterface)
   domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw)
   O[D.n, D.f, D.oh, D.ow] += BinaryFn.add(TypeFn.cast_signed(U, B[D.f]) + TypeFn.cast_signed(
       U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH,
@@ -299,6 +301,7 @@ def conv_2d_tensor_add_lrelu(
   is incorrect. Implementation of correct conv_2d_tensor_add_lrelu functionality. Current
   inner loop functionality is a dummy implementation
   """
+  implements(ConvolutionOpInterface)
   domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw)
   O[D.n, D.f, D.oh, D.ow] += alpha * BinaryFn.add(TypeFn.cast_signed(U, B[D.f]) + TypeFn.cast_signed(
       U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH,
