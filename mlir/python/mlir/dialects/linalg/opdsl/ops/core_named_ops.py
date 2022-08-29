@@ -311,6 +311,119 @@ def conv_2d_tensor_add_lrelu(
 
 
 @linalg_structured_op
+def conv_2d_tensor_add_globalaveragepool(
+    I=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
+    K=TensorDef(T2, S.F, S.C, S.KH, S.KW),
+    B=TensorDef(T3, S.F),
+    J=TensorDef(T1, S.N, S.F, S.OH, S.OW),
+    O=TensorDef(U, S.N, S.F, S.C1, S.C1, output=True),
+    strides=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
+    dilations=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
+  """Performs fused 2-D convolution, elementwise add and global average pool.
+
+  Note last two dimensions of the output tensor should be always set to 1 as the table
+  gen file was generated using the python Linalg DSL. However, due to the DSL constrains
+  these dimensions must be symbolic.
+
+  Layout:
+    * I: NxCIxHxW   (Input to Convlution)
+    * K: FxCIxKHxKW (Kernel to Convolution)
+    * B: F          (Bias added to Convolution)
+    * J: NxCOxOHxOW (Input to ElemAdd after Convolution of I)
+    * O: NxCOx1x1   (Output Tensor Shape after GlobalAveragePool)
+  
+  Note, we cannot model this operator with a convolution interface because the relationship
+  between input dimensions, filter dimensions and output dimensions do not meet the requirements
+  for convolution.
+
+  Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
+  is incorrect. Implementation of correct conv_2d_tensor_add_globalaveragepool functionality. Current
+  inner loop functionality is a dummy implementation
+  """
+  domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw, D.c1)
+  # Below implementation is completly incorrect
+  O[D.n, D.f, D.c1, D.c1] += BinaryFn.add(TypeFn.cast_signed(U, B[D.f]) +
+  TypeFn.cast_signed(U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH, D.ow * S.SW + D.kw * S.DW])
+         * TypeFn.cast_signed(U, K[D.f, D.c, D.kh, D.kw]),
+         TypeFn.cast_signed(T1, J[D.n, D.f, D.oh, D.ow]))
+
+@linalg_structured_op
+def conv_2d_tensor_add_relu_globalaveragepool(
+    I=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
+    K=TensorDef(T2, S.F, S.C, S.KH, S.KW),
+    B=TensorDef(T3, S.F),
+    J=TensorDef(T1, S.N, S.F, S.OH, S.OW),
+    O=TensorDef(U, S.N, S.F, S.C1, S.C1, output=True),
+    strides=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
+    dilations=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
+  """Performs fused Conv2D + Tensor-Add + ReLU + GlobalAveragePool compound operation
+
+  Note last two dimensions of the output tensor should be always set to 1 as the table
+  gen file was generated using the python Linalg DSL. However, due to the DSL constrains
+  these dimensions must be symbolic.
+
+  Layout:
+    * I: NxCIxHxW   (Input to Convlution)
+    * K: FxCIxKHxKW (Kernel to Convolution)
+    * B: F          (Bias added to Convolution)
+    * J: NxCOxOHxOW (Input to ElemAdd after Convolution of I)
+    * O: NxCOx1x1   (Output Tensor Shape after GlobalAveragePool)
+
+  Note, we cannot model this operator with a convolution interface because the relationship
+  between input dimensions, filter dimensions and output dimensions do not meet the requirements
+  for convolution.
+
+  Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
+  is incorrect. Implementation of correct conv_2d_tensor_add_relu_globalaveragepool functionality.
+  Current inner loop functionality is a dummy implementation
+  """
+  domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw, D.c1)
+  # Below implementation is completly incorrect
+  O[D.n, D.f, D.c1, D.c1] += BinaryFn.add(TypeFn.cast_signed(U, B[D.f]) +
+  TypeFn.cast_signed(U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH, D.ow * S.SW + D.kw * S.DW])
+         * TypeFn.cast_signed(U, K[D.f, D.c, D.kh, D.kw]),
+         TypeFn.cast_signed(T1, J[D.n, D.f, D.oh, D.ow]))
+
+@linalg_structured_op
+def conv_2d_tensor_add_lrelu_globalaveragepool(
+    I=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
+    K=TensorDef(T2, S.F, S.C, S.KH, S.KW),
+    B=TensorDef(T3, S.F),
+    J=TensorDef(T1, S.N, S.F, S.OH, S.OW),
+    A=ScalarDef(F32),
+    O=TensorDef(U, S.N, S.F, S.C1, S.C1, output=True),
+    strides=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
+    dilations=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
+  """Performs fused Conv2D + Tensor-Add + LeakyReLU + GlobalAveragePool compound operation
+
+  Note last two dimensions of the output tensor should be always set to 1 as the table
+  gen file was generated using the python Linalg DSL. However, due to the DSL constrains
+  these dimensions must be symbolic.
+
+  Layout:
+    * I: NxCIxHxW   (Input to Convlution)
+    * K: FxCIxKHxKW (Kernel to Convolution)
+    * B: F          (Bias added to Convolution)
+    * J: NxCOxOHxOW (Input to ElemAdd after Convolution of I)
+    * A: F32        (alpha value for the leaky relu op)
+    * O: NxCOx1x1   (Output Tensor Shape after GlobalAveragePool)
+
+  Note, we cannot model this operator with a convolution interface because the relationship
+  between input dimensions, filter dimensions and output dimensions do not meet the requirements
+  for convolution.
+
+  Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
+  is incorrect. Implementation of correct conv_2d_tensor_add_lrelu_globalaveragepool functionality.
+  Current inner loop functionality is a dummy implementation
+  """
+  domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw, D.c1)
+  # Below implementation is completly incorrect
+  O[D.n, D.f, D.c1, D.c1] += BinaryFn.mul(A,BinaryFn.add(TypeFn.cast_signed(U, B[D.f]) +
+  TypeFn.cast_signed(U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH, D.ow * S.SW + D.kw * S.DW])
+         * TypeFn.cast_signed(U, K[D.f, D.c, D.kh, D.kw]),
+         TypeFn.cast_signed(T1, J[D.n, D.f, D.oh, D.ow])))
+
+@linalg_structured_op
 def elemwise_binary(lhs=TensorDef(T1),
                     rhs=TensorDef(T2),
                     O=TensorDef(U, output=True),

@@ -1375,6 +1375,473 @@ structured_op: !LinalgStructuredOpConfig
                       scalar_arg: J
 --- !LinalgOpConfig
 metadata: !LinalgOpMetadata
+  name: conv_2d_tensor_add_globalaveragepool
+  cpp_class_name: Conv2DTensorAddGlobalaveragepoolOp
+  doc: |-
+    Performs fused 2-D convolution, elementwise add and global average pool.
+
+    Note last two dimensions of the output tensor should be always set to 1 as the table
+    gen file was generated using the python Linalg DSL. However, due to the DSL constrains
+    these dimensions must be symbolic.
+
+    Layout:
+      * I: NxCIxHxW   (Input to Convlution)
+      * K: FxCIxKHxKW (Kernel to Convolution)
+      * B: F          (Bias added to Convolution)
+      * J: NxCOxOHxOW (Input to ElemAdd after Convolution of I)
+      * O: NxCOx1x1   (Output Tensor Shape after GlobalAveragePool)
+
+    Note, we cannot model this operator with a convolution interface because the relationship
+    between input dimensions, filter dimensions and output dimensions do not meet the requirements
+    for convolution.
+
+    Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
+    is incorrect. Implementation of correct conv_2d_tensor_add_globalaveragepool functionality. Current
+    inner loop functionality is a dummy implementation
+structured_op: !LinalgStructuredOpConfig
+  args:
+  - !LinalgOperandDefConfig
+    name: I
+    kind: input_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] ->
+      (s0, s1, s2 * s3 + s4 * s5, s6 * s7 + s8 * s9)>
+  - !LinalgOperandDefConfig
+    name: K
+    kind: input_tensor
+    type_var: T2
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] ->
+      (s10, s1, s4, s8)>
+  - !LinalgOperandDefConfig
+    name: B
+    kind: input_tensor
+    type_var: T3
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] ->
+      (s10)>
+  - !LinalgOperandDefConfig
+    name: J
+    kind: input_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] ->
+      (s0, s10, s2, s6)>
+  - !LinalgOperandDefConfig
+    name: O
+    kind: output_tensor
+    type_var: U
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] ->
+      (s0, s10, s11, s11)>
+  - !LinalgOperandDefConfig
+    name: strides
+    kind: index_attr
+    index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11]
+      -> (s3, s7)>
+    default_indices:
+    - 1
+    - 1
+  - !LinalgOperandDefConfig
+    name: dilations
+    kind: index_attr
+    index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11]
+      -> (s5, s9)>
+    default_indices:
+    - 1
+    - 1
+  indexing_maps: !LinalgIndexingMapsConfig
+    static_indexing_maps:
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6, d7)[s0, s1, s2, s3, s4, s5, s6, s7,
+      s8, s9, s10, s11] -> (d0, d4, d2 * s3 + d5 * s5, d3 * s7 + d6 * s9)>
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6, d7)[s0, s1, s2, s3, s4, s5, s6, s7,
+      s8, s9, s10, s11] -> (d1, d4, d5, d6)>
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6, d7)[s0, s1, s2, s3, s4, s5, s6, s7,
+      s8, s9, s10, s11] -> (d1)>
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6, d7)[s0, s1, s2, s3, s4, s5, s6, s7,
+      s8, s9, s10, s11] -> (d0, d1, d2, d3)>
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6, d7)[s0, s1, s2, s3, s4, s5, s6, s7,
+      s8, s9, s10, s11] -> (d0, d1, d7, d7)>
+  iterator_types:
+  - parallel
+  - parallel
+  - reduction
+  - reduction
+  - reduction
+  - reduction
+  - reduction
+  - parallel
+  assignments:
+  - !ScalarAssign
+    arg: O
+    value: !ScalarExpression
+      scalar_fn:
+        kind: binary
+        fn_name: add
+        operands:
+        - !ScalarExpression
+          scalar_arg: O
+        - !ScalarExpression
+          scalar_fn:
+            kind: binary
+            fn_name: add
+            operands:
+            - !ScalarExpression
+              scalar_fn:
+                kind: binary
+                fn_name: add
+                operands:
+                - !ScalarExpression
+                  scalar_fn:
+                    kind: type
+                    fn_name: cast_signed
+                    type_var: U
+                    operands:
+                    - !ScalarExpression
+                      scalar_arg: B
+                - !ScalarExpression
+                  scalar_fn:
+                    kind: binary
+                    fn_name: mul
+                    operands:
+                    - !ScalarExpression
+                      scalar_fn:
+                        kind: type
+                        fn_name: cast_signed
+                        type_var: U
+                        operands:
+                        - !ScalarExpression
+                          scalar_arg: I
+                    - !ScalarExpression
+                      scalar_fn:
+                        kind: type
+                        fn_name: cast_signed
+                        type_var: U
+                        operands:
+                        - !ScalarExpression
+                          scalar_arg: K
+            - !ScalarExpression
+              scalar_fn:
+                kind: type
+                fn_name: cast_signed
+                type_var: T1
+                operands:
+                - !ScalarExpression
+                  scalar_arg: J
+--- !LinalgOpConfig
+metadata: !LinalgOpMetadata
+  name: conv_2d_tensor_add_relu_globalaveragepool
+  cpp_class_name: Conv2DTensorAddReluGlobalaveragepoolOp
+  doc: |-
+    Performs fused Conv2D + Tensor-Add + ReLU + GlobalAveragePool compound operation
+
+    Note last two dimensions of the output tensor should be always set to 1 as the table
+    gen file was generated using the python Linalg DSL. However, due to the DSL constrains
+    these dimensions must be symbolic.
+
+    Layout:
+      * I: NxCIxHxW   (Input to Convlution)
+      * K: FxCIxKHxKW (Kernel to Convolution)
+      * B: F          (Bias added to Convolution)
+      * J: NxCOxOHxOW (Input to ElemAdd after Convolution of I)
+      * O: NxCOx1x1   (Output Tensor Shape after GlobalAveragePool)
+
+    Note, we cannot model this operator with a convolution interface because the relationship
+    between input dimensions, filter dimensions and output dimensions do not meet the requirements
+    for convolution.
+
+    Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
+    is incorrect. Implementation of correct conv_2d_tensor_add_relu_globalaveragepool functionality.
+    Current inner loop functionality is a dummy implementation
+structured_op: !LinalgStructuredOpConfig
+  args:
+  - !LinalgOperandDefConfig
+    name: I
+    kind: input_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] ->
+      (s0, s1, s2 * s3 + s4 * s5, s6 * s7 + s8 * s9)>
+  - !LinalgOperandDefConfig
+    name: K
+    kind: input_tensor
+    type_var: T2
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] ->
+      (s10, s1, s4, s8)>
+  - !LinalgOperandDefConfig
+    name: B
+    kind: input_tensor
+    type_var: T3
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] ->
+      (s10)>
+  - !LinalgOperandDefConfig
+    name: J
+    kind: input_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] ->
+      (s0, s10, s2, s6)>
+  - !LinalgOperandDefConfig
+    name: O
+    kind: output_tensor
+    type_var: U
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] ->
+      (s0, s10, s11, s11)>
+  - !LinalgOperandDefConfig
+    name: strides
+    kind: index_attr
+    index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11]
+      -> (s3, s7)>
+    default_indices:
+    - 1
+    - 1
+  - !LinalgOperandDefConfig
+    name: dilations
+    kind: index_attr
+    index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11]
+      -> (s5, s9)>
+    default_indices:
+    - 1
+    - 1
+  indexing_maps: !LinalgIndexingMapsConfig
+    static_indexing_maps:
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6, d7)[s0, s1, s2, s3, s4, s5, s6, s7,
+      s8, s9, s10, s11] -> (d0, d4, d2 * s3 + d5 * s5, d3 * s7 + d6 * s9)>
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6, d7)[s0, s1, s2, s3, s4, s5, s6, s7,
+      s8, s9, s10, s11] -> (d1, d4, d5, d6)>
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6, d7)[s0, s1, s2, s3, s4, s5, s6, s7,
+      s8, s9, s10, s11] -> (d1)>
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6, d7)[s0, s1, s2, s3, s4, s5, s6, s7,
+      s8, s9, s10, s11] -> (d0, d1, d2, d3)>
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6, d7)[s0, s1, s2, s3, s4, s5, s6, s7,
+      s8, s9, s10, s11] -> (d0, d1, d7, d7)>
+  iterator_types:
+  - parallel
+  - parallel
+  - reduction
+  - reduction
+  - reduction
+  - reduction
+  - reduction
+  - parallel
+  assignments:
+  - !ScalarAssign
+    arg: O
+    value: !ScalarExpression
+      scalar_fn:
+        kind: binary
+        fn_name: add
+        operands:
+        - !ScalarExpression
+          scalar_arg: O
+        - !ScalarExpression
+          scalar_fn:
+            kind: binary
+            fn_name: add
+            operands:
+            - !ScalarExpression
+              scalar_fn:
+                kind: binary
+                fn_name: add
+                operands:
+                - !ScalarExpression
+                  scalar_fn:
+                    kind: type
+                    fn_name: cast_signed
+                    type_var: U
+                    operands:
+                    - !ScalarExpression
+                      scalar_arg: B
+                - !ScalarExpression
+                  scalar_fn:
+                    kind: binary
+                    fn_name: mul
+                    operands:
+                    - !ScalarExpression
+                      scalar_fn:
+                        kind: type
+                        fn_name: cast_signed
+                        type_var: U
+                        operands:
+                        - !ScalarExpression
+                          scalar_arg: I
+                    - !ScalarExpression
+                      scalar_fn:
+                        kind: type
+                        fn_name: cast_signed
+                        type_var: U
+                        operands:
+                        - !ScalarExpression
+                          scalar_arg: K
+            - !ScalarExpression
+              scalar_fn:
+                kind: type
+                fn_name: cast_signed
+                type_var: T1
+                operands:
+                - !ScalarExpression
+                  scalar_arg: J
+--- !LinalgOpConfig
+metadata: !LinalgOpMetadata
+  name: conv_2d_tensor_add_lrelu_globalaveragepool
+  cpp_class_name: Conv2DTensorAddLreluGlobalaveragepoolOp
+  doc: |-
+    Performs fused Conv2D + Tensor-Add + LeakyReLU + GlobalAveragePool compound operation
+
+    Note last two dimensions of the output tensor should be always set to 1 as the table
+    gen file was generated using the python Linalg DSL. However, due to the DSL constrains
+    these dimensions must be symbolic.
+
+    Layout:
+      * I: NxCIxHxW   (Input to Convlution)
+      * K: FxCIxKHxKW (Kernel to Convolution)
+      * B: F          (Bias added to Convolution)
+      * J: NxCOxOHxOW (Input to ElemAdd after Convolution of I)
+      * A: F32        (alpha value for the leaky relu op)
+      * O: NxCOx1x1   (Output Tensor Shape after GlobalAveragePool)
+
+    Note, we cannot model this operator with a convolution interface because the relationship
+    between input dimensions, filter dimensions and output dimensions do not meet the requirements
+    for convolution.
+
+    Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
+    is incorrect. Implementation of correct conv_2d_tensor_add_lrelu_globalaveragepool functionality.
+    Current inner loop functionality is a dummy implementation
+structured_op: !LinalgStructuredOpConfig
+  args:
+  - !LinalgOperandDefConfig
+    name: I
+    kind: input_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] ->
+      (s0, s1, s2 * s3 + s4 * s5, s6 * s7 + s8 * s9)>
+  - !LinalgOperandDefConfig
+    name: K
+    kind: input_tensor
+    type_var: T2
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] ->
+      (s10, s1, s4, s8)>
+  - !LinalgOperandDefConfig
+    name: B
+    kind: input_tensor
+    type_var: T3
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] ->
+      (s10)>
+  - !LinalgOperandDefConfig
+    name: J
+    kind: input_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] ->
+      (s0, s10, s2, s6)>
+  - !LinalgOperandDefConfig
+    name: A
+    kind: scalar
+    type_var: F32
+  - !LinalgOperandDefConfig
+    name: O
+    kind: output_tensor
+    type_var: U
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] ->
+      (s0, s10, s11, s11)>
+  - !LinalgOperandDefConfig
+    name: strides
+    kind: index_attr
+    index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11]
+      -> (s3, s7)>
+    default_indices:
+    - 1
+    - 1
+  - !LinalgOperandDefConfig
+    name: dilations
+    kind: index_attr
+    index_attr_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11]
+      -> (s5, s9)>
+    default_indices:
+    - 1
+    - 1
+  indexing_maps: !LinalgIndexingMapsConfig
+    static_indexing_maps:
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6, d7)[s0, s1, s2, s3, s4, s5, s6, s7,
+      s8, s9, s10, s11] -> (d0, d4, d2 * s3 + d5 * s5, d3 * s7 + d6 * s9)>
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6, d7)[s0, s1, s2, s3, s4, s5, s6, s7,
+      s8, s9, s10, s11] -> (d1, d4, d5, d6)>
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6, d7)[s0, s1, s2, s3, s4, s5, s6, s7,
+      s8, s9, s10, s11] -> (d1)>
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6, d7)[s0, s1, s2, s3, s4, s5, s6, s7,
+      s8, s9, s10, s11] -> (d0, d1, d2, d3)>
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6, d7)[s0, s1, s2, s3, s4, s5, s6, s7,
+      s8, s9, s10, s11] -> ()>
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6, d7)[s0, s1, s2, s3, s4, s5, s6, s7,
+      s8, s9, s10, s11] -> (d0, d1, d7, d7)>
+  iterator_types:
+  - parallel
+  - parallel
+  - reduction
+  - reduction
+  - reduction
+  - reduction
+  - reduction
+  - parallel
+  assignments:
+  - !ScalarAssign
+    arg: O
+    value: !ScalarExpression
+      scalar_fn:
+        kind: binary
+        fn_name: add
+        operands:
+        - !ScalarExpression
+          scalar_arg: O
+        - !ScalarExpression
+          scalar_fn:
+            kind: binary
+            fn_name: mul
+            operands:
+            - !ScalarExpression
+              scalar_arg: A
+            - !ScalarExpression
+              scalar_fn:
+                kind: binary
+                fn_name: add
+                operands:
+                - !ScalarExpression
+                  scalar_fn:
+                    kind: binary
+                    fn_name: add
+                    operands:
+                    - !ScalarExpression
+                      scalar_fn:
+                        kind: type
+                        fn_name: cast_signed
+                        type_var: U
+                        operands:
+                        - !ScalarExpression
+                          scalar_arg: B
+                    - !ScalarExpression
+                      scalar_fn:
+                        kind: binary
+                        fn_name: mul
+                        operands:
+                        - !ScalarExpression
+                          scalar_fn:
+                            kind: type
+                            fn_name: cast_signed
+                            type_var: U
+                            operands:
+                            - !ScalarExpression
+                              scalar_arg: I
+                        - !ScalarExpression
+                          scalar_fn:
+                            kind: type
+                            fn_name: cast_signed
+                            type_var: U
+                            operands:
+                            - !ScalarExpression
+                              scalar_arg: K
+                - !ScalarExpression
+                  scalar_fn:
+                    kind: type
+                    fn_name: cast_signed
+                    type_var: T1
+                    operands:
+                    - !ScalarExpression
+                      scalar_arg: J
+--- !LinalgOpConfig
+metadata: !LinalgOpMetadata
   name: elemwise_binary
   cpp_class_name: ElemwiseBinaryOp
   doc: |-

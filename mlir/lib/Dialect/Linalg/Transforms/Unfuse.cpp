@@ -153,9 +153,9 @@ struct Conv2DTensorAddLowering : OpRewritePattern<Conv2DTensorAddOp> {
 };
 
 struct Conv2DTensorAddAveragePoolLowering
-    : OpRewritePattern<Conv2dTensorAddGlobalAveragePoolOp> {
-  using OpRewritePattern<Conv2dTensorAddGlobalAveragePoolOp>::OpRewritePattern;
-  LogicalResult matchAndRewrite(Conv2dTensorAddGlobalAveragePoolOp op,
+    : OpRewritePattern<Conv2DTensorAddGlobalaveragepoolOp> {
+  using OpRewritePattern<Conv2DTensorAddGlobalaveragepoolOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(Conv2DTensorAddGlobalaveragepoolOp op,
                                 PatternRewriter &rewriter) const override {
     // Sanity check: number of operands, none are optional!
     assert(op->getNumOperands() == 5 && "expected 5 operands");
@@ -163,17 +163,17 @@ struct Conv2DTensorAddAveragePoolLowering
     // Unfuse the convolution
     auto convResult = unfuse2DConvolution(
         rewriter, op, /*ifm=*/op->getOperand(0),
-        /*weights=*/op->getOperand(2), /*bias=*/op->getOperand(3));
+        /*weights=*/op->getOperand(1), /*bias=*/op->getOperand(2));
 
     // Unfuse the add
     Value addResult =
         rewriter
-            .create<arith::AddFOp>(op->getLoc(), convResult, op->getOperand(1))
+            .create<arith::AddFOp>(op->getLoc(), convResult, op->getOperand(3))
             ->getResult(0);
 
     // Unfuse the average pool
     rewriter.replaceOpWithNewOp<linalg::GlobalAveragePool2DOp>(
-        op, op.getType(), addResult);
+        op, op.getType(0), addResult);
     return success();
   }
 };
@@ -237,9 +237,10 @@ struct Conv2DTensorAddReluLowering : OpRewritePattern<Conv2DTensorAddReluOp> {
 };
 
 struct Conv2DTensorAddReluAveragePoolLowering
-    : OpRewritePattern<Conv2dTensorAddReluGlobalAveragePoolOp> {
-  using OpRewritePattern<Conv2dTensorAddReluGlobalAveragePoolOp>::OpRewritePattern;
-  LogicalResult matchAndRewrite(Conv2dTensorAddReluGlobalAveragePoolOp op,
+    : OpRewritePattern<Conv2DTensorAddReluGlobalaveragepoolOp> {
+  using OpRewritePattern<
+      Conv2DTensorAddReluGlobalaveragepoolOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(Conv2DTensorAddReluGlobalaveragepoolOp op,
                                 PatternRewriter &rewriter) const override {
     // Sanity check: number of operands, none are optional!
     assert(op->getNumOperands() == 5 && "expected 5 operands");
@@ -247,12 +248,12 @@ struct Conv2DTensorAddReluAveragePoolLowering
     // Unfuse the convolution
     auto convResult = unfuse2DConvolution(
         rewriter, op, /*ifm=*/op->getOperand(0),
-        /*weights=*/op->getOperand(2), /*bias=*/op->getOperand(3));
+        /*weights=*/op->getOperand(1), /*bias=*/op->getOperand(2));
 
     // Unfuse the add
     Value addResult =
         rewriter
-            .create<arith::AddFOp>(op->getLoc(), convResult, op->getOperand(1))
+            .create<arith::AddFOp>(op->getLoc(), convResult, op->getOperand(3))
             ->getResult(0);
 
     // Unfuse the ReLU
@@ -262,7 +263,7 @@ struct Conv2DTensorAddReluAveragePoolLowering
 
     // Unfuse the average pool
     rewriter.replaceOpWithNewOp<linalg::GlobalAveragePool2DOp>(
-        op, op.getType(), reluResult);
+        op, op.getType(0), reluResult);
     return success();
   }
 };
@@ -332,9 +333,10 @@ struct Conv2DTensorAddLreluLowering : OpRewritePattern<Conv2DTensorAddLreluOp> {
 };
 
 struct Conv2DTensorAddLreluAveragePoolLowering
-    : OpRewritePattern<Conv2dTensorAddLreluGlobalAveragePoolOp> {
-  using OpRewritePattern<Conv2dTensorAddLreluGlobalAveragePoolOp>::OpRewritePattern;
-  LogicalResult matchAndRewrite(Conv2dTensorAddLreluGlobalAveragePoolOp op,
+    : OpRewritePattern<Conv2DTensorAddLreluGlobalaveragepoolOp> {
+  using OpRewritePattern<
+      Conv2DTensorAddLreluGlobalaveragepoolOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(Conv2DTensorAddLreluGlobalaveragepoolOp op,
                                 PatternRewriter &rewriter) const override {
     // Sanity check: number of operands, none are optional!
     assert(op->getNumOperands() == 6 && "expected 6 operands");
@@ -342,12 +344,12 @@ struct Conv2DTensorAddLreluAveragePoolLowering
     // Unfuse the convolution
     auto convResult = unfuse2DConvolution(
         rewriter, op, /*ifm=*/op->getOperand(0),
-        /*weights=*/op->getOperand(2), /*bias=*/op->getOperand(3));
+        /*weights=*/op->getOperand(1), /*bias=*/op->getOperand(2));
 
     // Unfuse the add
     Value addResult =
         rewriter
-            .create<arith::AddFOp>(op->getLoc(), convResult, op->getOperand(1))
+            .create<arith::AddFOp>(op->getLoc(), convResult, op->getOperand(3))
             ->getResult(0);
 
     // Unfuse the leaky ReLU
@@ -358,7 +360,7 @@ struct Conv2DTensorAddLreluAveragePoolLowering
 
     // Unfuse the average pool
     rewriter.replaceOpWithNewOp<linalg::GlobalAveragePool2DOp>(
-        op, op.getType(), reluResult);
+        op, op.getType(0), reluResult);
     return success();
   }
 };

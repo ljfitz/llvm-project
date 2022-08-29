@@ -44,7 +44,7 @@ func.func @unfuse_conv_2d_tensor_add_globalaveragepool(%ifm : tensor<1x1024x10x1
     %init = tensor.splat %zero : tensor<1x1024x1x1xf32>
     %result = linalg.conv_2d_tensor_add_globalaveragepool
         {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>}
-        ins(%ifm, %summand, %weights, %bias : tensor<1x1024x10x10xf32>, tensor<1x1024x8x8xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>)
+        ins(%ifm, %weights, %bias, %summand : tensor<1x1024x10x10xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>, tensor<1x1024x8x8xf32>)
         outs(%init : tensor<1x1024x1x1xf32>)
         -> tensor<1x1024x1x1xf32>
 
