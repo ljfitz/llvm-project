@@ -13,7 +13,7 @@ func.func @unfuse_conv_2d_tensor_add(%ifm : tensor<1x1024x10x10xf32>, %summand :
     %init = tensor.splat %zero : tensor<1x1024x8x8xf32>
     %result = linalg.conv_2d_tensor_add
         {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>}
-        ins(%ifm, %summand, %weights, %bias : tensor<1x1024x10x10xf32>, tensor<1x1024x8x8xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>)
+        ins(%ifm, %weights, %bias, %summand : tensor<1x1024x10x10xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>, tensor<1x1024x8x8xf32>)
         outs(%init : tensor<1x1024x8x8xf32>)
         -> tensor<1x1024x8x8xf32>
 
@@ -110,7 +110,7 @@ func.func @unfuse_conv_2d_tensor_add_relu(%ifm : tensor<1x1024x17x17xf32>, %summ
     %init = tensor.splat %zero : tensor<1x1024x7x7xf32>
     %result = linalg.conv_2d_tensor_add_relu
         {dilations = dense<2> : tensor<2xi64>, strides = dense<2> : tensor<2xi64>}
-        ins(%ifm, %summand, %weights, %bias : tensor<1x1024x17x17xf32>, tensor<1x1024x7x7xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>)
+        ins(%ifm, %weights, %bias, %summand : tensor<1x1024x17x17xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>, tensor<1x1024x7x7xf32>)
         outs(%init : tensor<1x1024x7x7xf32>)
         -> tensor<1x1024x7x7xf32>
 
@@ -221,7 +221,7 @@ func.func @unfuse_conv_2d_tensor_add_lrelu(%ifm : tensor<1x1024x15x15xf32>, %sum
     %init = tensor.splat %zero : tensor<1x1024x13x13xf32>
     %result = linalg.conv_2d_tensor_add_lrelu
         {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>}
-        ins(%ifm, %summand, %weights, %bias, %alpha : tensor<1x1024x15x15xf32>, tensor<1x1024x13x13xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>, f32)
+        ins(%ifm, %weights, %bias, %summand, %alpha : tensor<1x1024x15x15xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>, tensor<1x1024x13x13xf32>, f32)
         outs(%init : tensor<1x1024x13x13xf32>)
         -> tensor<1x1024x13x13xf32>
 
