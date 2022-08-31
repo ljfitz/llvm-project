@@ -701,38 +701,6 @@ LogicalResult GlobalAveragePool2DOp::verify() {
 }
 
 //===----------------------------------------------------------------------===//
-// Linear
-//===----------------------------------------------------------------------===//
-
-LogicalResult LinearOp::verify() {
-  auto inputTensor = input().getType().dyn_cast<RankedTensorType>();
-  auto weightsTensor = weights().getType().dyn_cast<RankedTensorType>();
-  auto biasTensor = bias().getType().dyn_cast<RankedTensorType>();
-  auto outputTensor = result().getType().dyn_cast<RankedTensorType>();
-
-  if (!inputTensor || !weightsTensor || !biasTensor || !outputTensor)
-    return failure();
-
-  if (inputTensor.getRank() != 2 || weightsTensor.getRank() != 2)
-    return emitOpError("rank of input and weights tensors needs to be 2");
-
-  if (biasTensor.getRank() != 1)
-    return emitOpError("rank of bias tensor needs to be 1");
-
-  // remember linear = A*B^T+C meaning:
-  //   * the dim 1 of input must match dim 1 of the weights
-  //   * the dim 0 of input must match dim 0 of the output
-  //   * the dim 0 of weights must match dim 1 of the output
-  //   * the dim 0 of bias must match dim 1 of the output
-  if ((inputTensor.getShape()[1] != weightsTensor.getShape()[1]) ||
-      (inputTensor.getShape()[0] != outputTensor.getShape()[0]) ||
-      (weightsTensor.getShape()[0] != outputTensor.getShape()[1]) ||
-      (biasTensor.getShape()[0] != outputTensor.getShape()[1]))
-    return emitOpError("input, weights and bias dimensions needs to match");
-  return success();
-}
-
-//===----------------------------------------------------------------------===//
 // FusedOp
 //===----------------------------------------------------------------------===//
 

@@ -433,11 +433,15 @@ func.func @unfuse_globalaveragepool2d(%ifm : tensor<1x2048x7x7xf32>) -> tensor<1
 
     return %result : tensor<1x2048x1x1xf32>
 }
+
+// -----
+
 // CHECK: func @unfuse_linear(
 // CHECK-SAME: %[[input:.+]]: tensor<1x2048xf32>, %[[weights:.+]]: tensor<1000x2048xf32>, %[[bias:.+]]: tensor<1000xf32>
 func.func @unfuse_linear(%input: tensor<1x2048xf32>, %weights: tensor<1000x2048xf32>, %bias: tensor<1000xf32>) -> tensor<1x1000xf32> {
-
-    %result = linalg.linear ins(%input: tensor<1x2048xf32>, %weights: tensor<1000x2048xf32>, %bias: tensor<1000xf32>) -> tensor<1x1000xf32>
+    %zero = arith.constant 0.0 : f32
+    %init = tensor.splat %zero : tensor<1x1000xf32>
+    %result = linalg.linear ins(%input, %weights, %bias: tensor<1x2048xf32>, tensor<1000x2048xf32>, tensor<1000xf32>) outs(%init: tensor<1x1000xf32>) -> tensor<1x1000xf32>
 
 // CHECK:  %[[tweightshape:.+]] = linalg.init_tensor [2048, 1000] : tensor<2048x1000xf32>
 // CHECK:  %[[tweights:.+]] = linalg.transpose2d ins(%arg1 : tensor<1000x2048xf32>) outs(%0 : tensor<2048x1000xf32>) -> tensor<2048x1000xf32>

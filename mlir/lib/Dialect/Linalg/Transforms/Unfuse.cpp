@@ -649,9 +649,9 @@ struct LinearLowering : OpRewritePattern<LinearOp> {
   LogicalResult matchAndRewrite(LinearOp op,
                                 PatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
-    Value input = op.input();
-    Value weights = op.weights();
-    Value bias = op.bias();
+    Value input = op.getOperand(0);
+    Value weights = op.getOperand(1);
+    Value bias = op.getOperand(2);
     Value output = op->getResult(0);
 
     auto inputType = input.getType().cast<RankedTensorType>();

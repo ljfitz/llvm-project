@@ -197,6 +197,34 @@ def transpose2d(
   domain(D.W, D.H)
   output[D.H, D.W] = input[D.W, D.H]
 
+@linalg_structured_op
+def linear(
+    I=TensorDef(T1, S.W, S.H),
+    W=TensorDef(T1,  S.K, S.H),
+    B=TensorDef(T1,  S.K),
+    O=TensorDef(T1,  S.W, S.K, output=True)):
+  """
+    The following custom operator implements the linear operator 
+      y = I * transpose(W) + B
+    Remember, B is broadcastable, therefore it is of rank 1.
+    Linear can be decomposed into two generic linalg operators one broadcasting
+    B into 2D tensor, the other transposing the weights. With a linalg matmul
+    consuming the input tensor, transposed weights and the broadcasted B tensor.
+
+    Note the implementation of the functionality for linear in named structured
+    ops is incorrect as we cannot add the bias at the end of the multiplication
+    for one output element.
+
+  Layout:
+    * I: WH (Input)
+    * W: WH (Weights)
+    * B: H  (Bias)
+  """
+  domain(D.W, D.H, D.K)
+  # implementation is incorrect the addition of the bias should happen after
+  # the multiplication, not on each element
+  O[D.W, D.K] += I[D.W, D.H]*W[D.K, D.H] + B[D.K]
+
 # Standard linalg ops
 
 @linalg_structured_op

@@ -210,25 +210,6 @@ def Linalg_GlobalAveragePool2DOp : Linalg_Op<"globalaveragepool2d", [NoSideEffec
   let hasVerifier = 1;
 }
 
-def Linalg_LinearOp : Linalg_Op<"linear", [NoSideEffect]> {
-  let arguments = (
-    ins AnyTensor:$input, 
-        AnyTensor:$weights, 
-        AnyTensor:$bias
-    );
-  let results = (outs AnyTensor:$result);
-  let summary = "linalg linear operation (y=A*B^T+C)";
-  let description = [{
-    The following custom operator implements the linear operator y=A*B^T+C.
-    Remember, C is broadcastable, therefore it is of rank 1.
-    Linear can be decomposed into two generic linalg operators one broadcasting
-    C into 2D tensor, the other transposing the weights. With a linalg matmul
-    consuming the input tensor, transposed weights and the broadcasted C tensor.
-  }];
-  let assemblyFormat = [{ attr-dict `ins``(` $input `:` type($input)`,` $weights `:` type($weights)`,` $bias `:` type($bias) `)` `->` type(results) }];
-  let hasVerifier = 1;
-}
-
 def Linalg_FusedOp
     : Linalg_Op<"fused", [
         IsolatedFromAbove,

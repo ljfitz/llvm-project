@@ -851,6 +851,77 @@ structured_op: !LinalgStructuredOpConfig
       scalar_arg: input
 --- !LinalgOpConfig
 metadata: !LinalgOpMetadata
+  name: linear
+  cpp_class_name: LinearOp
+  doc: "  The following custom operator implements the linear operator \n    y = I\
+    \ * transpose(W) + B\n  Remember, B is broadcastable, therefore it is of rank\
+    \ 1.\n  Linear can be decomposed into two generic linalg operators one broadcasting\n\
+    \  B into 2D tensor, the other transposing the weights. With a linalg matmul\n\
+    \  consuming the input tensor, transposed weights and the broadcasted B tensor.\n\
+    \n  Note the implementation of the functionality for linear in named structured\n\
+    \  ops is incorrect as we cannot add the bias at the end of the multiplication\n\
+    \  for one output element.\n\nLayout:\n  * I: WH (Input)\n  * W: WH (Weights)\n\
+    \  * B: H  (Bias)"
+structured_op: !LinalgStructuredOpConfig
+  args:
+  - !LinalgOperandDefConfig
+    name: I
+    kind: input_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1, s2] -> (s0, s1)>
+  - !LinalgOperandDefConfig
+    name: W
+    kind: input_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1, s2] -> (s2, s1)>
+  - !LinalgOperandDefConfig
+    name: B
+    kind: input_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1, s2] -> (s2)>
+  - !LinalgOperandDefConfig
+    name: O
+    kind: output_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1, s2] -> (s0, s2)>
+  indexing_maps: !LinalgIndexingMapsConfig
+    static_indexing_maps:
+    - affine_map<(d0, d1, d2)[s0, s1, s2] -> (d0, d1)>
+    - affine_map<(d0, d1, d2)[s0, s1, s2] -> (d2, d1)>
+    - affine_map<(d0, d1, d2)[s0, s1, s2] -> (d2)>
+    - affine_map<(d0, d1, d2)[s0, s1, s2] -> (d0, d2)>
+  iterator_types:
+  - parallel
+  - reduction
+  - parallel
+  assignments:
+  - !ScalarAssign
+    arg: O
+    value: !ScalarExpression
+      scalar_fn:
+        kind: binary
+        fn_name: add
+        operands:
+        - !ScalarExpression
+          scalar_arg: O
+        - !ScalarExpression
+          scalar_fn:
+            kind: binary
+            fn_name: add
+            operands:
+            - !ScalarExpression
+              scalar_fn:
+                kind: binary
+                fn_name: mul
+                operands:
+                - !ScalarExpression
+                  scalar_arg: I
+                - !ScalarExpression
+                  scalar_arg: W
+            - !ScalarExpression
+              scalar_arg: B
+--- !LinalgOpConfig
+metadata: !LinalgOpMetadata
   name: copy
   cpp_class_name: CopyOp
   doc: |-
