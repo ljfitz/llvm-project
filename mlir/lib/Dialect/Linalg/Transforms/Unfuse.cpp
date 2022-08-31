@@ -142,11 +142,11 @@ struct Conv2DTensorAddLowering : OpRewritePattern<Conv2DTensorAddOp> {
     auto convResult =
         unfuse2DConvolution(rewriter, op,
                             /*ifm=*/op.getInputOperand(0)->get(),
-                            /*weights=*/op.getInputOperand(2)->get(),
-                            /*bias=*/op.getInputOperand(3)->get());
+                            /*weights=*/op.getInputOperand(1)->get(),
+                            /*bias=*/op.getInputOperand(2)->get());
     // Unfuse the Add.
     rewriter.replaceOpWithNewOp<arith::AddFOp>(op, convResult,
-                                               op.getInputOperand(1)->get());
+                                               op.getInputOperand(3)->get());
 
     return success();
   }
@@ -216,13 +216,13 @@ struct Conv2DTensorAddReluLowering : OpRewritePattern<Conv2DTensorAddReluOp> {
     auto convResult =
         unfuse2DConvolution(rewriter, op,
                             /*ifm=*/op.getInputOperand(0)->get(),
-                            /*weights=*/op.getInputOperand(2)->get(),
-                            /*bias=*/op.getInputOperand(3)->get());
+                            /*weights=*/op.getInputOperand(1)->get(),
+                            /*bias=*/op.getInputOperand(2)->get());
 
     // Unfuse the Add.
     auto addResult = rewriter
                          .create<arith::AddFOp>(op->getLoc(), convResult,
-                                                op.getInputOperand(1)->get())
+                                                op.getInputOperand(3  )->get())
                          .getResult();
 
     // Unfuse the ReLU.
@@ -308,13 +308,13 @@ struct Conv2DTensorAddLreluLowering : OpRewritePattern<Conv2DTensorAddLreluOp> {
     auto convResult =
         unfuse2DConvolution(rewriter, op,
                             /*ifm=*/op.getInputOperand(0)->get(),
-                            /*weights=*/op.getInputOperand(2)->get(),
-                            /*bias=*/op.getInputOperand(3)->get());
+                            /*weights=*/op.getInputOperand(1)->get(),
+                            /*bias=*/op.getInputOperand(2)->get());
 
     // Unfuse the Add.
     auto addResult = rewriter
                          .create<arith::AddFOp>(op->getLoc(), convResult,
-                                                op.getInputOperand(1)->get())
+                                                op.getInputOperand(3)->get())
                          .getResult();
 
     // Unfuse the leaky ReLU.

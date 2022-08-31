@@ -786,8 +786,7 @@ metadata: !LinalgOpMetadata
   name: broadcast_1d_to_2d
   cpp_class_name: Broadcast1DTo2DOp
   doc: |-
-    Broadcast the input tensor from 1D to 2D assuming the
-    input tensor describes a single column.
+    Broadcast the input tensor from 1D to 2D
 
     Layout:
       * Input: H
@@ -955,16 +954,12 @@ metadata: !LinalgOpMetadata
     Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
     is incorrect. Implementation of correct conv_2d_tensor_add functionality. Current
     inner loop functionality is a dummy implementation
+  implements:
+  - LinalgConvolutionOpInterface
 structured_op: !LinalgStructuredOpConfig
   args:
   - !LinalgOperandDefConfig
     name: I
-    kind: input_tensor
-    type_var: T1
-    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s0,
-      s1, s2 * s3 + s4 * s5, s6 * s7 + s8 * s9)>
-  - !LinalgOperandDefConfig
-    name: J
     kind: input_tensor
     type_var: T1
     shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s0,
@@ -980,6 +975,12 @@ structured_op: !LinalgStructuredOpConfig
     kind: input_tensor
     type_var: T3
     shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s10)>
+  - !LinalgOperandDefConfig
+    name: J
+    kind: input_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s0,
+      s10, s2, s6)>
   - !LinalgOperandDefConfig
     name: O
     kind: output_tensor
@@ -1007,11 +1008,11 @@ structured_op: !LinalgStructuredOpConfig
     - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
       s9, s10] -> (d0, d4, d2 * s3 + d5 * s5, d3 * s7 + d6 * s9)>
     - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
-      s9, s10] -> (d0, d1, d2, d3)>
-    - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
       s9, s10] -> (d1, d4, d5, d6)>
     - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
       s9, s10] -> (d1)>
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
+      s9, s10] -> (d0, d1, d2, d3)>
     - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
       s9, s10] -> (d0, d1, d2, d3)>
   iterator_types:
@@ -1093,16 +1094,12 @@ metadata: !LinalgOpMetadata
     Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
     is incorrect. Implementation of correct conv_2d_tensor_add_relu functionality. Current
     inner loop functionality is a dummy implementation
+  implements:
+  - LinalgConvolutionOpInterface
 structured_op: !LinalgStructuredOpConfig
   args:
   - !LinalgOperandDefConfig
     name: I
-    kind: input_tensor
-    type_var: T1
-    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s0,
-      s1, s2 * s3 + s4 * s5, s6 * s7 + s8 * s9)>
-  - !LinalgOperandDefConfig
-    name: J
     kind: input_tensor
     type_var: T1
     shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s0,
@@ -1118,6 +1115,12 @@ structured_op: !LinalgStructuredOpConfig
     kind: input_tensor
     type_var: T3
     shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s10)>
+  - !LinalgOperandDefConfig
+    name: J
+    kind: input_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s0,
+      s10, s2, s6)>
   - !LinalgOperandDefConfig
     name: O
     kind: output_tensor
@@ -1145,11 +1148,11 @@ structured_op: !LinalgStructuredOpConfig
     - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
       s9, s10] -> (d0, d4, d2 * s3 + d5 * s5, d3 * s7 + d6 * s9)>
     - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
-      s9, s10] -> (d0, d1, d2, d3)>
-    - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
       s9, s10] -> (d1, d4, d5, d6)>
     - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
       s9, s10] -> (d1)>
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
+      s9, s10] -> (d0, d1, d2, d3)>
     - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
       s9, s10] -> (d0, d1, d2, d3)>
   iterator_types:
@@ -1231,16 +1234,12 @@ metadata: !LinalgOpMetadata
     Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
     is incorrect. Implementation of correct conv_2d_tensor_add_lrelu functionality. Current
     inner loop functionality is a dummy implementation
+  implements:
+  - LinalgConvolutionOpInterface
 structured_op: !LinalgStructuredOpConfig
   args:
   - !LinalgOperandDefConfig
     name: I
-    kind: input_tensor
-    type_var: T1
-    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s0,
-      s1, s2 * s3 + s4 * s5, s6 * s7 + s8 * s9)>
-  - !LinalgOperandDefConfig
-    name: J
     kind: input_tensor
     type_var: T1
     shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s0,
@@ -1256,6 +1255,12 @@ structured_op: !LinalgStructuredOpConfig
     kind: input_tensor
     type_var: T3
     shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s10)>
+  - !LinalgOperandDefConfig
+    name: J
+    kind: input_tensor
+    type_var: T1
+    shape_map: affine_map<()[s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] -> (s0,
+      s10, s2, s6)>
   - !LinalgOperandDefConfig
     name: alpha
     kind: scalar
@@ -1287,11 +1292,11 @@ structured_op: !LinalgStructuredOpConfig
     - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
       s9, s10] -> (d0, d4, d2 * s3 + d5 * s5, d3 * s7 + d6 * s9)>
     - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
-      s9, s10] -> (d0, d1, d2, d3)>
-    - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
       s9, s10] -> (d1, d4, d5, d6)>
     - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
       s9, s10] -> (d1)>
+    - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
+      s9, s10] -> (d0, d1, d2, d3)>
     - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,
       s9, s10] -> ()>
     - affine_map<(d0, d1, d2, d3, d4, d5, d6)[s0, s1, s2, s3, s4, s5, s6, s7, s8,

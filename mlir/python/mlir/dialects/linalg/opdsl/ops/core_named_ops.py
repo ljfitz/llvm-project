@@ -228,9 +228,9 @@ def elemwise_unary(I=TensorDef(T1),
 @linalg_structured_op
 def conv_2d_tensor_add(
     I=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
-    J=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
     K=TensorDef(T2, S.F, S.C, S.KH, S.KW),
     B=TensorDef(T3, S.F),
+    J=TensorDef(T1, S.N, S.F, S.OH, S.OW),
     O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
     strides=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
     dilations=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
@@ -244,6 +244,7 @@ def conv_2d_tensor_add(
   is incorrect. Implementation of correct conv_2d_tensor_add functionality. Current
   inner loop functionality is a dummy implementation
   """
+  implements(ConvolutionOpInterface)
   domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw)
   O[D.n, D.f, D.oh, D.ow] += BinaryFn.add(TypeFn.cast_signed(U, B[D.f]) + TypeFn.cast_signed(
       U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH,
@@ -255,9 +256,9 @@ def conv_2d_tensor_add(
 @linalg_structured_op
 def conv_2d_tensor_add_relu(
     I=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
-    J=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
     K=TensorDef(T2, S.F, S.C, S.KH, S.KW),
     B=TensorDef(T3, S.F),
+    J=TensorDef(T1, S.N, S.F, S.OH, S.OW),
     O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
     strides=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
     dilations=IndexAttrDef(S.DH, S.DW, default=[1, 1])):
@@ -271,6 +272,7 @@ def conv_2d_tensor_add_relu(
   is incorrect. Implementation of correct conv_2d_tensor_add_relu functionality. Current
   inner loop functionality is a dummy implementation
   """
+  implements(ConvolutionOpInterface)
   domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw)
   O[D.n, D.f, D.oh, D.ow] += BinaryFn.add(TypeFn.cast_signed(U, B[D.f]) + TypeFn.cast_signed(
       U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH,
@@ -282,9 +284,9 @@ def conv_2d_tensor_add_relu(
 @linalg_structured_op
 def conv_2d_tensor_add_lrelu(
     I=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
-    J=TensorDef(T1, S.N, S.C, S.OH * S.SH + S.KH * S.DH, S.OW * S.SW + S.KW * S.DW),
     K=TensorDef(T2, S.F, S.C, S.KH, S.KW),
     B=TensorDef(T3, S.F),
+    J=TensorDef(T1, S.N, S.F, S.OH, S.OW),
     alpha=ScalarDef(F32),
     O=TensorDef(U, S.N, S.F, S.OH, S.OW, output=True),
     strides=IndexAttrDef(S.SH, S.SW, default=[1, 1]),
@@ -299,6 +301,7 @@ def conv_2d_tensor_add_lrelu(
   is incorrect. Implementation of correct conv_2d_tensor_add_lrelu functionality. Current
   inner loop functionality is a dummy implementation
   """
+  implements(ConvolutionOpInterface)
   domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw)
   O[D.n, D.f, D.oh, D.ow] += alpha * BinaryFn.add(TypeFn.cast_signed(U, B[D.f]) + TypeFn.cast_signed(
       U, I[D.n, D.c, D.oh * S.SH + D.kh * S.DH,
