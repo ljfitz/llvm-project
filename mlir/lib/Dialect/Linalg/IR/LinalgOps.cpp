@@ -856,16 +856,54 @@ void FusedOp::print(OpAsmPrinter &p) {
   };
 }
 
+
+/// Parses a captured SSA operand.
+///
+/// Format:
+///     ssa-id `=` ssa-id `:` type
+static ParseResult parseCapture(
+    OpAsmParser &p,
+    OpAsmParser::UnresolvedOperand &arg,
+    OpAsmParser::UnresolvedOperand &src,
+    Type &type)
+{
+    // ssa-id `=` ssa-id `:` type
+    if (p.parseOperand(arg)) return failure();
+    if (p.parseEqual()) return failure();
+    if (p.parseOperand(src)) return failure();
+    if (p.parseColon()) return failure();
+    if (p.parseType(type)) return failure();
+
+    return success();
+}
+
+/// Parses a comma-separated list of zero or more captured SSA operands.
+///
+/// Format:
+///     `(` [ capture { `,` capture } ] `)`
+static ParseResult parseCaptures(
+    OpAsmParser &p,
+    SmallVectorImpl<OpAsmParser::Argument> &args,
+    SmallVectorImpl<Value> &srcs)
+{
+    // `(` [ capture { `,` capture } ] `)`
+    return p.parseCommaSeparatedList(
+        OpAsmParser::Delimiter::Paren,
+        [&]() -> ParseResult {
+            auto &arg = args.emplace_back();
+            OpAsmParser::UnresolvedOperand src;
+            if (parseCapture(p, arg.ssaName, src, arg.type)) return failure();
+            if (p.resolveOperand(src, arg.type, srcs)) return failure();
+            return success();
+        });
+}
+
+
 ParseResult FusedOp::parse(OpAsmParser &p, OperationState &state) {
-  SmallVector<OpAsmParser::UnresolvedOperand> captures;
-  SmallVector<Type> captureTypes;
   SmallVector<OpAsmParser::Argument> captureArgs;
 
   // (%arg0 = %capture0 : type, ...)
-  if (p.parseAssignmentList(captureArgs, captures))
-    return failure();
-  if (p.resolveOperands(captures, captureTypes, p.getNameLoc(), state.operands))
-    return failure();
+  if (parseCaptures(p, captureArgs, state.operands)) return failure();
 
   // attr-dict-with-keyword
   if (p.parseOptionalAttrDictWithKeyword(state.attributes))
