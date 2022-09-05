@@ -364,9 +364,8 @@ def conv_2d_tensor_add_globalaveragepool(
   between input dimensions, filter dimensions and output dimensions do not meet the requirements
   for convolution.
 
-  Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
-  is incorrect. Implementation of correct conv_2d_tensor_add_globalaveragepool functionality. Current
-  inner loop functionality is a dummy implementation
+  Note the loop functionality is incorrect and will not execute correctly - see -linalg-unfuse
+  to get a valid executable expansion.
   """
   domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw, D.c1)
   # Below implementation is completly incorrect
@@ -401,9 +400,8 @@ def conv_2d_tensor_add_relu_globalaveragepool(
   between input dimensions, filter dimensions and output dimensions do not meet the requirements
   for convolution.
 
-  Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
-  is incorrect. Implementation of correct conv_2d_tensor_add_relu_globalaveragepool functionality.
-  Current inner loop functionality is a dummy implementation
+  Note the loop functionality is incorrect and will not execute correctly - see -linalg-unfuse
+  to get a valid executable expansion.
   """
   domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw, D.c1)
   # Below implementation is completly incorrect
@@ -440,9 +438,8 @@ def conv_2d_tensor_add_lrelu_globalaveragepool(
   between input dimensions, filter dimensions and output dimensions do not meet the requirements
   for convolution.
 
-  Todo: When this fused op is lowered to generic/affine/loops the inner loop functionality
-  is incorrect. Implementation of correct conv_2d_tensor_add_lrelu_globalaveragepool functionality.
-  Current inner loop functionality is a dummy implementation
+  Note the loop functionality is incorrect and will not execute correctly - see -linalg-unfuse
+  to get a valid executable expansion.
   """
   domain(D.n, D.f, D.oh, D.ow, D.c, D.kh, D.kw, D.c1)
   # Below implementation is completly incorrect
