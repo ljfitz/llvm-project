@@ -54,7 +54,7 @@ func.func @split_vector_transfer_read_2d(%A: memref<?x8xf32>, %i: index, %j: ind
   // CHECK-SAME:     memref<?x8xf32>, index, index
   //      CHECK: }
   //      CHECK: %[[res:.*]] = vector.transfer_read %[[ifres]]#0[%[[ifres]]#1, %[[ifres]]#2], %cst
-  // CHECK_SAME:   {in_bounds = [true, true]} : memref<?x8xf32>, vector<4x8xf32>
+  // CHECK-SAME:   {in_bounds = [true, true]} : memref<?x8xf32>, vector<4x8xf32>
 
   //  LINALG-DAG: %[[c0:.*]] = arith.constant 0 : index
   //  LINALG-DAG: %[[c4:.*]] = arith.constant 4 : index
@@ -89,7 +89,7 @@ func.func @split_vector_transfer_read_2d(%A: memref<?x8xf32>, %i: index, %j: ind
   // LINALG-SAME:     memref<?x8xf32>, index, index
   //      LINALG: }
   //      LINALG: %[[res:.*]] = vector.transfer_read %[[ifres]]#0[%[[ifres]]#1, %[[ifres]]#2], %cst
-  // LINALG_SAME:   {in_bounds = [true, true]} : memref<?x8xf32>, vector<4x8xf32>
+  // LINALG-SAME:   {in_bounds = [true, true]} : memref<?x8xf32>, vector<4x8xf32>
   %1 = vector.transfer_read %A[%i, %j], %f0 : memref<?x8xf32>, vector<4x8xf32>
 
   // LINALG: return %[[res]] : vector<4x8xf32>
@@ -411,4 +411,24 @@ func.func @transfer_read_within_async_execute(%A : memref<?x?xf32>) -> !async.to
     async.yield
   }
   return %token : !async.token
+}
+
+// -----
+
+func.func private @fake_side_effecting_fun(%0: vector<2x2xf32>) -> ()
+
+// Ensure that `alloca`s are inserted outside of loops even though loops are
+// consdered allocation scopes.
+// CHECK-LABEL: transfer_read_within_scf_for
+func.func @transfer_read_within_scf_for(%A : memref<?x?xf32>, %lb : index, %ub : index, %step : index) {
+  %c0 = arith.constant 0 : index
+  %f0 = arith.constant 0.0 : f32
+  // CHECK: alloca
+  // CHECK: scf.for
+  // CHECK-NOT: alloca
+  scf.for %i = %lb to %ub step %step {
+    %0 = vector.transfer_read %A[%c0, %c0], %f0 : memref<?x?xf32>, vector<2x2xf32>
+    func.call @fake_side_effecting_fun(%0) : (vector<2x2xf32>) -> ()
+  }
+  return
 }

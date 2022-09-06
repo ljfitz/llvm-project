@@ -2,13 +2,13 @@ add_lldb_unittest(LLDBCoreTests
   CommunicationTest.cpp
   DiagnosticEventTest.cpp
   DumpDataExtractorTest.cpp
+  FileSpecListTest.cpp
   FormatEntityTest.cpp
   MangledTest.cpp
   ModuleSpecTest.cpp
   RichManglingContextTest.cpp
   SourceLocationSpecTest.cpp
   SourceManagerTest.cpp
-  StreamCallbackTest.cpp
   UniqueCStringMapTest.cpp
 
   LINK_LIBS

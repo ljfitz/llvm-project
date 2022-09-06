@@ -104,12 +104,16 @@ public:
     /// Cached preambles are potentially large. If false, store them on disk.
     bool StorePreamblesInMemory = true;
 
+    /// This throttler controls which preambles may be built at a given time.
+    clangd::PreambleThrottler *PreambleThrottler = nullptr;
+
     /// If true, ClangdServer builds a dynamic in-memory index for symbols in
     /// opened files and uses the index to augment code completion results.
     bool BuildDynamicSymbolIndex = false;
     /// If true, ClangdServer automatically indexes files in the current project
     /// on background threads. The index is stored in the project root.
     bool BackgroundIndex = false;
+    llvm::ThreadPriority BackgroundIndexPriority = llvm::ThreadPriority::Low;
 
     /// If set, use this index to augment code completion results.
     SymbolIndex *StaticIndex = nullptr;
@@ -163,6 +167,9 @@ public:
     FeatureModuleSet *FeatureModules = nullptr;
     /// If true, use the dirty buffer contents when building Preambles.
     bool UseDirtyHeaders = false;
+
+    // If true, parse emplace-like functions in the preamble.
+    bool PreambleParseForwardingFunctions = false;
 
     explicit operator TUScheduler::Options() const;
   };
@@ -383,7 +390,7 @@ public:
   // Returns false if the timeout expires.
   // FIXME: various subcomponents each get the full timeout, so it's more of
   // an order of magnitude than a hard deadline.
-  LLVM_NODISCARD bool
+  [[nodiscard]] bool
   blockUntilIdleForTest(llvm::Optional<double> TimeoutSeconds = 10);
 
   /// Builds a nested representation of memory used by components.
@@ -416,12 +423,15 @@ private:
 
   bool UseDirtyHeaders = false;
 
+  bool PreambleParseForwardingFunctions = false;
+
   // GUARDED_BY(CachedCompletionFuzzyFindRequestMutex)
   llvm::StringMap<llvm::Optional<FuzzyFindRequest>>
       CachedCompletionFuzzyFindRequestByFile;
   mutable std::mutex CachedCompletionFuzzyFindRequestMutex;
 
   llvm::Optional<std::string> WorkspaceRoot;
+  llvm::Optional<AsyncTaskRunner> IndexTasks; // for stdlib indexing.
   llvm::Optional<TUScheduler> WorkScheduler;
   // Invalidation policy used for actions that we assume are "transient".
   TUScheduler::ASTActionInvalidation Transient;

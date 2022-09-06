@@ -205,7 +205,9 @@ let Pattern = [(null_frag)] in {
     foreach TYPE = [MxType16, MxType32] in
     def MOV # TYPE.Size # REG # AM # _TC
         : MxMove_RM<TYPE, REG, !cast<MxOpBundle>("MxOp"#TYPE.Size#"AddrMode_"#AM),
-                    !cast<MxEncMemOp>("MxMoveSrcOpEnc_"#AM)>;
+                    !cast<MxEncMemOp>("MxMoveSrcOpEnc_"#AM)> {
+      let isCodeGenOnly = true;
+    }
   } // foreach AM
 } // let Pattern
 
@@ -434,6 +436,35 @@ class MxLEA<MxOpBundle SRC, MxEncMemOp SRC_ENC>
 foreach AM = ["p", "f", "b", "q", "k"] in
 def LEA32 # AM : MxLEA<!cast<MxOpBundle>("MxOp32AddrMode_"#AM),
                        !cast<MxEncMemOp>("MxMoveSrcOpEnc_"#AM)>;
+
+//===----------------------------------------------------------------------===//
+// LINK/UNLK
+//===----------------------------------------------------------------------===//
+
+let Uses = [SP], Defs = [SP] in {
+let mayStore = 1 in {
+
+def LINK16 : MxInst<(outs), (ins MxARD16:$src, Mxi16imm:$disp), "link.w\t$src, $disp", []> {
+  let Inst = (ascend
+    (descend 0b0100111001010, (operand "$src", 3)),
+    (operand "$disp", 16)
+  );
+}
+
+def LINK32 : MxInst<(outs), (ins MxARD16:$src, Mxi32imm:$disp), "link.l\t$src, $disp", []> {
+  let Inst = (ascend
+    (descend 0b0100100000001, (operand "$src", 3)),
+    (slice "$disp", 31, 16),
+    (slice "$disp", 15, 0)
+  );
+}
+
+def UNLK : MxInst<(outs), (ins MxARD32:$src), "unlk\t$src", []> {
+  let Inst = (descend 0b0100111001011, (operand "$src", 3));
+}
+
+} // let mayStore = 1
+} // let Uses = [SP], Defs = [SP]
 
 //===----------------------------------------------------------------------===//
 // Pseudos

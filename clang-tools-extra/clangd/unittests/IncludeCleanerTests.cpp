@@ -91,6 +91,14 @@ TEST(IncludeCleaner, ReferencedLocations) {
           X<A> x;
         )cpp"},
       {R"cpp(
+          namespace ns { template<typename T> class A {}; }
+          namespace absl {using ns::^A;}
+       )cpp",
+       R"cpp(
+          template <template <typename> class T> class X {};
+          X<absl::A> x;
+       )cpp"},
+      {R"cpp(
           namespace ns { template<typename T> struct ^A { ^A(T); }; }
           using ns::^A;
        )cpp",
@@ -378,9 +386,9 @@ TEST(IncludeCleaner, VirtualBuffers) {
 
     using flags::FLAGS_FOO;
 
-    // CLI will come from a define, __llvm__ is a built-in. In both cases, they
+    // CLI will come from a define, __cplusplus is a built-in. In both cases, they
     // come from non-existent files.
-    int y = CLI + __llvm__;
+    int y = CLI + __cplusplus;
 
     int concat(a, b) = 42;
     )cpp";
@@ -536,8 +544,7 @@ TEST(IncludeCleaner, IWYUPragmas) {
   EXPECT_TRUE(
       ReferencedFiles.User.contains(AST.getSourceManager().getMainFileID()));
   EXPECT_THAT(AST.getDiagnostics(), llvm::ValueIs(IsEmpty()));
-  auto Unused = computeUnusedIncludes(AST);
-  EXPECT_THAT(Unused, IsEmpty());
+  EXPECT_THAT(computeUnusedIncludes(AST), IsEmpty());
 }
 
 TEST(IncludeCleaner, RecursiveInclusion) {
@@ -564,12 +571,32 @@ TEST(IncludeCleaner, RecursiveInclusion) {
   )cpp");
   ParsedAST AST = TU.build();
 
-  auto ReferencedFiles = findReferencedFiles(
-      findReferencedLocations(AST), AST.getIncludeStructure(),
-      AST.getCanonicalIncludes(), AST.getSourceManager());
   EXPECT_THAT(AST.getDiagnostics(), llvm::ValueIs(IsEmpty()));
-  auto Unused = computeUnusedIncludes(AST);
-  EXPECT_THAT(Unused, IsEmpty());
+  EXPECT_THAT(computeUnusedIncludes(AST), IsEmpty());
+}
+
+TEST(IncludeCleaner, IWYUPragmaExport) {
+  TestTU TU;
+  TU.Code = R"cpp(
+    #include "foo.h"
+    )cpp";
+  TU.AdditionalFiles["foo.h"] = R"cpp(
+    #ifndef FOO_H
+    #define FOO_H
+
+    #include "bar.h" // IWYU pragma: export
+
+    #endif
+  )cpp";
+  TU.AdditionalFiles["bar.h"] = guard(R"cpp(
+    void bar() {}
+  )cpp");
+  ParsedAST AST = TU.build();
+
+  EXPECT_THAT(AST.getDiagnostics(), llvm::ValueIs(IsEmpty()));
+  // FIXME: This is not correct: foo.h is unused but is not diagnosed as such
+  // because we ignore headers with IWYU export pragmas for now.
+  EXPECT_THAT(computeUnusedIncludes(AST), IsEmpty());
 }
 
 } // namespace

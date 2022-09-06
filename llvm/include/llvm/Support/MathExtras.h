@@ -22,10 +22,6 @@
 #include <limits>
 #include <type_traits>
 
-#ifdef __ANDROID_NDK__
-#include <android/api-level.h>
-#endif
-
 #ifdef _MSC_VER
 // Declare these intrinsics manually rather including intrin.h. It's very
 // expensive, and MathExtras.h is popular.
@@ -608,15 +604,6 @@ template <size_t kValue> constexpr inline size_t CTLog2() {
 
 template <> constexpr inline size_t CTLog2<1>() { return 0; }
 
-/// Return the log base 2 of the specified value.
-inline double Log2(double Value) {
-#if defined(__ANDROID_API__) && __ANDROID_API__ < 18
-  return __builtin_log(Value) / __builtin_log(2.0);
-#else
-  return log2(Value);
-#endif
-}
-
 /// Return the floor log base 2 of the specified value, -1 if the value is zero.
 /// (32 bit edition.)
 /// Ex. Log2_32(32) == 5, Log2_32(1) == 0, Log2_32(0) == -1, Log2_32(6) == 2
@@ -735,27 +722,40 @@ inline uint64_t PowerOf2Ceil(uint64_t A) {
 /// Returns the next integer (mod 2**64) that is greater than or equal to
 /// \p Value and is a multiple of \p Align. \p Align must be non-zero.
 ///
-/// If non-zero \p Skew is specified, the return value will be a minimal
-/// integer that is greater than or equal to \p Value and equal to
-/// \p Align * N + \p Skew for some integer N. If \p Skew is larger than
-/// \p Align, its value is adjusted to '\p Skew mod \p Align'.
-///
 /// Examples:
 /// \code
 ///   alignTo(5, 8) = 8
 ///   alignTo(17, 8) = 24
 ///   alignTo(~0LL, 8) = 0
 ///   alignTo(321, 255) = 510
+/// \endcode
+inline uint64_t alignTo(uint64_t Value, uint64_t Align) {
+  assert(Align != 0u && "Align can't be 0.");
+  return (Value + Align - 1) / Align * Align;
+}
+
+inline uint64_t alignToPowerOf2(uint64_t Value, uint64_t Align) {
+  assert(Align != 0 && (Align & (Align - 1)) == 0 &&
+         "Align must be a power of 2");
+  return (Value + Align - 1) & -Align;
+}
+
+/// If non-zero \p Skew is specified, the return value will be a minimal integer
+/// that is greater than or equal to \p Size and equal to \p A * N + \p Skew for
+/// some integer N. If \p Skew is larger than \p A, its value is adjusted to '\p
+/// Skew mod \p A'. \p Align must be non-zero.
 ///
+/// Examples:
+/// \code
 ///   alignTo(5, 8, 7) = 7
 ///   alignTo(17, 8, 1) = 17
 ///   alignTo(~0LL, 8, 3) = 3
 ///   alignTo(321, 255, 42) = 552
 /// \endcode
-inline uint64_t alignTo(uint64_t Value, uint64_t Align, uint64_t Skew = 0) {
+inline uint64_t alignTo(uint64_t Value, uint64_t Align, uint64_t Skew) {
   assert(Align != 0u && "Align can't be 0.");
   Skew %= Align;
-  return (Value + Align - 1 - Skew) / Align * Align + Skew;
+  return alignTo(Value - Skew, Align) + Skew;
 }
 
 /// Returns the next integer (mod 2**64) that is greater than or equal to

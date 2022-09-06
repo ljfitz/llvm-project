@@ -24,17 +24,17 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 
 template <class _Comp, class _Proj>
 class _MinmaxElementLessFunc {
-  _Comp& __comp;
-  _Proj& __proj;
+  _Comp& __comp_;
+  _Proj& __proj_;
 
 public:
   _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR
-  _MinmaxElementLessFunc(_Comp& __comp_, _Proj& __proj_) : __comp(__comp_), __proj(__proj_) {}
+  _MinmaxElementLessFunc(_Comp& __comp, _Proj& __proj) : __comp_(__comp), __proj_(__proj) {}
 
   template <class _Iter>
   _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_AFTER_CXX11
   bool operator()(_Iter& __it1, _Iter& __it2) {
-    return std::__invoke(__comp, std::__invoke(__proj, *__it1), std::__invoke(__proj, *__it2));
+    return std::__invoke(__comp_, std::__invoke(__proj_, *__it1), std::__invoke(__proj_, *__it2));
   }
 };
 
@@ -79,7 +79,7 @@ pair<_Iter, _Iter> __minmax_element_impl(_Iter __first, _Sent __last, _Comp& __c
 }
 
 template <class _ForwardIterator, class _Compare>
-_LIBCPP_NODISCARD_EXT _LIBCPP_CONSTEXPR_AFTER_CXX11
+_LIBCPP_NODISCARD_EXT _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_AFTER_CXX11
 pair<_ForwardIterator, _ForwardIterator>
 minmax_element(_ForwardIterator __first, _ForwardIterator __last, _Compare __comp) {
   static_assert(__is_cpp17_forward_iterator<_ForwardIterator>::value,

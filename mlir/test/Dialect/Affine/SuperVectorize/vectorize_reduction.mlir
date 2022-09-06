@@ -191,6 +191,61 @@ func.func @vecdim_reduction_maxui(%in: memref<256x512xi32>, %out: memref<256xi32
 
 // -----
 
+func.func @vecdim_reduction_andi(%in: memref<256x512xi32>, %out: memref<256xi32>) {
+ %cst = arith.constant -1 : i32
+ affine.for %i = 0 to 256 {
+   %final_red = affine.for %j = 0 to 512 iter_args(%red_iter = %cst) -> (i32) {
+     %ld = affine.load %in[%i, %j] : memref<256x512xi32>
+     %or = arith.andi %red_iter, %ld : i32
+     affine.yield %or : i32
+   }
+   affine.store %final_red, %out[%i] : memref<256xi32>
+ }
+ return
+}
+
+// CHECK-LABEL: @vecdim_reduction_andi
+// CHECK:       affine.for %{{.*}} = 0 to 256 {
+// CHECK:         %[[vallone:.*]] = arith.constant dense<-1> : vector<128xi32>
+// CHECK:         %[[vred:.*]] = affine.for %{{.*}} = 0 to 512 step 128 iter_args(%[[red_iter:.*]] = %[[vallone]]) -> (vector<128xi32>) {
+// CHECK:           %[[ld:.*]] = vector.transfer_read %{{.*}} : memref<256x512xi32>, vector<128xi32>
+// CHECK:           %[[and:.*]] = arith.andi %[[red_iter]], %[[ld]] : vector<128xi32>
+// CHECK:           affine.yield %[[and]] : vector<128xi32>
+// CHECK:         }
+// CHECK:         %[[final_red:.*]] = vector.reduction <and>, %[[vred:.*]] : vector<128xi32> into i32
+// CHECK:         affine.store %[[final_red]], %{{.*}} : memref<256xi32>
+// CHECK:       }
+
+// -----
+
+func.func @vecdim_reduction_ori(%in: memref<256x512xi32>, %out: memref<256xi32>) {
+ %cst = arith.constant 0 : i32
+ affine.for %i = 0 to 256 {
+   %final_red = affine.for %j = 0 to 512 iter_args(%red_iter = %cst) -> (i32) {
+     %ld = affine.load %in[%i, %j] : memref<256x512xi32>
+     %or = arith.ori %red_iter, %ld : i32
+     affine.yield %or : i32
+   }
+   affine.store %final_red, %out[%i] : memref<256xi32>
+ }
+ return
+}
+
+// CHECK-LABEL: @vecdim_reduction_ori
+// CHECK:       affine.for %{{.*}} = 0 to 256 {
+// CHECK:         %[[vzero:.*]] = arith.constant dense<0> : vector<128xi32>
+// CHECK:         %[[vred:.*]] = affine.for %{{.*}} = 0 to 512 step 128 iter_args(%[[red_iter:.*]] = %[[vzero]]) -> (vector<128xi32>) {
+// CHECK:           %[[ld:.*]] = vector.transfer_read %{{.*}} : memref<256x512xi32>, vector<128xi32>
+// CHECK:           %[[or:.*]] = arith.ori %[[red_iter]], %[[ld]] : vector<128xi32>
+// CHECK:           affine.yield %[[or]] : vector<128xi32>
+// CHECK:         }
+// CHECK:         %[[final_red:.*]] = vector.reduction <or>, %[[vred:.*]] : vector<128xi32> into i32
+// CHECK:         affine.store %[[final_red]], %{{.*}} : memref<256xi32>
+// CHECK:       }
+
+
+// -----
+
 // The inner reduction loop '%j' is vectorized. (The order of addf's operands is
 // different than in the previous test case).
 
@@ -475,9 +530,9 @@ func.func @vecdim_reduction_masked(%in: memref<256x512xf32>, %out: memref<256xf3
 // CHECK:           %[[elems_left:.*]] = affine.apply #[[$map0]](%[[iv]])
 // CHECK:           %[[mask:.*]] = vector.create_mask %[[elems_left]] : vector<128xi1>
 // CHECK:           %[[ld:.*]] = vector.transfer_read %{{.*}} : memref<256x512xf32>, vector<128xf32>
-// CHECK:           %[[add:.*]] = arith.addf %[[red_iter]], %[[ld]] : vector<128xf32>
-// CHECK:           %[[new_acc:.*]] = arith.select %[[mask]], %[[add]], %[[red_iter]] : vector<128xi1>, vector<128xf32>
-// CHECK:           affine.yield %[[new_acc]] : vector<128xf32>
+// CHECK:           %[[select:.*]] = arith.select %[[mask]], %[[ld]], %[[vzero]] : vector<128xi1>, vector<128xf32>
+// CHECK:           %[[add:.*]] = arith.addf %[[red_iter]], %[[select]] : vector<128xf32>
+// CHECK:           affine.yield %[[add]] : vector<128xf32>
 // CHECK:         }
 // CHECK:         %[[final_sum:.*]] = vector.reduction <add>, %[[vred:.*]] : vector<128xf32> into f32
 // CHECK:         affine.store %[[final_sum]], %{{.*}} : memref<256xf32>
@@ -508,9 +563,9 @@ func.func @vecdim_reduction_masked_unknown_ub(%in: memref<256x512xf32>, %out: me
 // CHECK:           %[[elems_left:.*]] = affine.apply #[[$map1]](%[[iv]])[%[[bnd]]]
 // CHECK:           %[[mask:.*]] = vector.create_mask %[[elems_left]] : vector<128xi1>
 // CHECK:           %[[ld:.*]] = vector.transfer_read %{{.*}} : memref<256x512xf32>, vector<128xf32>
-// CHECK:           %[[add:.*]] = arith.addf %[[red_iter]], %[[ld]] : vector<128xf32>
-// CHECK:           %[[new_acc:.*]] = arith.select %[[mask]], %[[add]], %[[red_iter]] : vector<128xi1>, vector<128xf32>
-// CHECK:           affine.yield %[[new_acc]] : vector<128xf32>
+// CHECK:           %[[select:.*]] = arith.select %[[mask]], %[[ld]], %[[vzero]] : vector<128xi1>, vector<128xf32>
+// CHECK:           %[[add:.*]] = arith.addf %[[red_iter]], %[[select]] : vector<128xf32>
+// CHECK:           affine.yield %[[add]] : vector<128xf32>
 // CHECK:         }
 // CHECK:         %[[final_sum:.*]] = vector.reduction <add>, %[[vred:.*]] : vector<128xf32> into f32
 // CHECK:         affine.store %[[final_sum]], %{{.*}} : memref<256xf32>
@@ -557,13 +612,14 @@ func.func @vecdim_reduction_masked_unknown_lb(%in: memref<256x512xf32>, %out: me
 
 // CHECK:       #[[$map2:.*]] = affine_map<([[d0:.*]]) -> (-[[d0]] + 512)>
 // CHECK-LABEL: @vecdim_reduction_masked_unknown_lb
+// CHECK:         %[[vzero:.*]] = arith.constant dense<0.000000e+00> : vector<128xf32>
 // CHECK:         %{{.*}} = affine.for %[[iv:.*]] = %[[lb:.*]] to 512 step 128 iter_args(%[[red_iter:.*]] = {{.*}}) -> (vector<128xf32>) {
 // CHECK:           %[[elems_left:.*]] = affine.apply #[[$map2]](%[[iv]])
 // CHECK:           %[[mask:.*]] = vector.create_mask %[[elems_left]] : vector<128xi1>
 // CHECK:           %[[ld:.*]] = vector.transfer_read %{{.*}} : memref<256x512xf32>, vector<128xf32>
-// CHECK:           %[[add:.*]] = arith.addf %[[red_iter]], %[[ld]] : vector<128xf32>
-// CHECK:           %[[new_acc:.*]] = arith.select %[[mask]], %[[add]], %[[red_iter]] : vector<128xi1>, vector<128xf32>
-// CHECK:           affine.yield %[[new_acc]] : vector<128xf32>
+// CHECK:           %[[select:.*]] = arith.select %[[mask]], %[[ld]], %[[vzero]] : vector<128xi1>, vector<128xf32>
+// CHECK:           %[[add:.*]] = arith.addf %[[red_iter]], %[[select]] : vector<128xf32>
+// CHECK:           affine.yield %[[add]] : vector<128xf32>
 
 // -----
 
@@ -585,14 +641,15 @@ func.func @vecdim_reduction_complex_ub(%in: memref<256x512xf32>, %out: memref<25
 // CHECK:       #[[$map3:.*]] = affine_map<([[d0:.*]], [[d1:.*]]) -> ([[d0]], [[d1]] * 2)>
 // CHECK:       #[[$map3_sub:.*]] = affine_map<([[d0:.*]], [[d1:.*]]) -> ([[d0]] - [[d1]])>
 // CHECK-LABEL: @vecdim_reduction_complex_ub
+// CHECK:         %[[vzero:.*]] = arith.constant dense<0.000000e+00> : vector<128xf32>
 // CHECK:         %{{.*}} = affine.for %[[iv:.*]] = 0 to min #[[$map3]](%[[M:.*]], %[[N:.*]]) step 128 iter_args(%[[red_iter:.*]] = {{.*}}) -> (vector<128xf32>) {
 // CHECK:           %[[ub:.*]] = affine.min #[[$map3]](%[[M]], %[[N]])
 // CHECK:           %[[elems_left:.*]] = affine.apply #[[$map3_sub]](%[[ub]], %[[iv]])
 // CHECK:           %[[mask:.*]] = vector.create_mask %[[elems_left]] : vector<128xi1>
 // CHECK:           %[[ld:.*]] = vector.transfer_read %{{.*}} : memref<256x512xf32>, vector<128xf32>
-// CHECK:           %[[add:.*]] = arith.addf %[[red_iter]], %[[ld]] : vector<128xf32>
-// CHECK:           %[[new_acc:.*]] = arith.select %[[mask]], %[[add]], %[[red_iter]] : vector<128xi1>, vector<128xf32>
-// CHECK:           affine.yield %[[new_acc]] : vector<128xf32>
+// CHECK:           %[[select:.*]] = arith.select %[[mask]], %[[ld]], %[[vzero]] : vector<128xi1>, vector<128xf32>
+// CHECK:           %[[add:.*]] = arith.addf %[[red_iter]], %[[select]] : vector<128xf32>
+// CHECK:           affine.yield %[[add]] : vector<128xf32>
 
 // -----
 
@@ -617,14 +674,16 @@ func.func @vecdim_two_reductions_masked(%in: memref<256x512xf32>, %out: memref<5
 // CHECK:       #[[$map4:.*]] = affine_map<([[d0:.*]]) -> (-[[d0]] + 500)>
 // CHECK-LABEL: @vecdim_two_reductions_masked
 // CHECK:       affine.for %{{.*}} = 0 to 256 {
+// CHECK:         %[[vzero0:.*]] = arith.constant dense<0.000000e+00> : vector<128xf32>
+// CHECK:         %[[vzero1:.*]] = arith.constant dense<0.000000e+00> : vector<128xf32>
 // CHECK:         %{{.*}} = affine.for %[[iv:.*]] = 0 to 500 step 128 iter_args(%[[sum_iter:.*]] = {{.*}}, %[[esum_iter:.*]] = {{.*}}) -> (vector<128xf32>, vector<128xf32>) {
 // CHECK:           %[[elems_left:.*]] = affine.apply #[[$map4]](%[[iv]])
 // CHECK:           %[[mask:.*]] = vector.create_mask %[[elems_left]] : vector<128xi1>
 // CHECK:           %[[ld:.*]] = vector.transfer_read %{{.*}} : memref<256x512xf32>, vector<128xf32>
 // CHECK:           %[[exp:.*]] = math.exp %[[ld]] : vector<128xf32>
-// CHECK:           %[[add:.*]] = arith.addf %[[sum_iter]], %[[ld]] : vector<128xf32>
-// CHECK:           %[[eadd:.*]] = arith.addf %[[esum_iter]], %[[exp]] : vector<128xf32>
-// CHECK:           %[[new_acc:.*]] = arith.select %[[mask]], %[[add]], %[[sum_iter]] : vector<128xi1>, vector<128xf32>
-// CHECK:           %[[new_eacc:.*]] = arith.select %[[mask]], %[[eadd]], %[[esum_iter]] : vector<128xi1>, vector<128xf32>
-// CHECK:           affine.yield %[[new_acc]], %[[new_eacc]] : vector<128xf32>
+// CHECK:           %[[select0:.*]] = arith.select %[[mask]], %[[ld]], %[[vzero0]] : vector<128xi1>, vector<128xf32>
+// CHECK:           %[[add:.*]] = arith.addf %[[sum_iter]], %[[select0]] : vector<128xf32>
+// CHECK:           %[[select1:.*]] = arith.select %[[mask]], %[[exp]], %[[vzero1]] : vector<128xi1>, vector<128xf32>
+// CHECK:           %[[eadd:.*]] = arith.addf %[[esum_iter]], %[[select1]] : vector<128xf32>
+// CHECK:           affine.yield %[[add]], %[[eadd]] : vector<128xf32>
 // CHECK:         }

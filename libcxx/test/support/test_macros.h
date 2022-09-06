@@ -166,6 +166,12 @@
 # define TEST_CONSTEXPR_CXX20
 #endif
 
+#if TEST_STD_VER > 20
+#  define TEST_CONSTEXPR_CXX23 constexpr
+#else
+#  define TEST_CONSTEXPR_CXX23
+#endif
+
 #define TEST_ALIGNAS_TYPE(...) TEST_ALIGNAS(TEST_ALIGNOF(__VA_ARGS__))
 
 #if !TEST_HAS_FEATURE(cxx_rtti) && !defined(__cpp_rtti) \
@@ -209,11 +215,6 @@
 #define TEST_CONSTINIT
 #endif
 
-#if !defined(__cpp_impl_three_way_comparison) \
-    && (!defined(_MSC_VER) || defined(__clang__) || _MSC_VER < 1920 || _MSVC_LANG <= 201703L)
-#define TEST_HAS_NO_SPACESHIP_OPERATOR
-#endif
-
 #if TEST_STD_VER < 11
 #define ASSERT_NOEXCEPT(...)
 #define ASSERT_NOT_NOEXCEPT(...)
@@ -238,6 +239,12 @@
 #define LIBCPP_ASSERT_NOEXCEPT(...) static_assert(true, "")
 #define LIBCPP_ASSERT_NOT_NOEXCEPT(...) static_assert(true, "")
 #define LIBCPP_ONLY(...) static_assert(true, "")
+#endif
+
+#if __has_cpp_attribute(nodiscard)
+#  define TEST_NODISCARD [[nodiscard]]
+#else
+#  define TEST_NODISCARD
 #endif
 
 #define TEST_IGNORE_NODISCARD (void)
@@ -306,8 +313,7 @@ inline void DoNotOptimize(Tp const& value) {
 #define TEST_NOT_WIN32(...) __VA_ARGS__
 #endif
 
-#if (defined(_WIN32) && !defined(_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS)) ||   \
-    defined(__MVS__) || defined(_AIX)
+#if defined(TEST_WINDOWS_DLL) ||defined(__MVS__) || defined(_AIX)
 // Macros for waiving cases when we can't count allocations done within
 // the library implementation.
 //
@@ -325,8 +331,7 @@ inline void DoNotOptimize(Tp const& value) {
 #define TEST_SUPPORTS_LIBRARY_INTERNAL_ALLOCATIONS 1
 #endif
 
-#if (defined(_WIN32) && !defined(_MSC_VER) &&                                  \
-     !defined(_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS)) ||                      \
+#if (defined(TEST_WINDOWS_DLL) && !defined(_MSC_VER)) ||                      \
     defined(__MVS__)
 // Normally, a replaced e.g. 'operator new' ends up used if the user code
 // does a call to e.g. 'operator new[]'; it's enough to replace the base
@@ -363,10 +368,6 @@ inline void DoNotOptimize(Tp const& value) {
 
 #if defined(_LIBCPP_HAS_NO_INT128) || defined(_MSVC_STL_VERSION)
 #   define TEST_HAS_NO_INT128
-#endif
-
-#if defined(_LIBCPP_HAS_NO_UNICODE_CHARS)
-#   define TEST_HAS_NO_UNICODE_CHARS
 #endif
 
 #if defined(_LIBCPP_HAS_NO_LOCALIZATION)

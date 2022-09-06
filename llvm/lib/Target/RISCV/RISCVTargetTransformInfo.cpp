@@ -65,13 +65,19 @@ InstructionCost RISCVTTIImpl::getIntImmCostInst(unsigned Opcode, unsigned Idx,
     if (Imm == UINT64_C(0xffff) && ST->hasStdExtZbb())
       return TTI::TCC_Free;
     // zext.w
-    if (Imm == UINT64_C(0xffffffff) && ST->hasStdExtZbb())
+    if (Imm == UINT64_C(0xffffffff) && ST->hasStdExtZba())
       return TTI::TCC_Free;
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
   case Instruction::Add:
   case Instruction::Or:
   case Instruction::Xor:
+    Takes12BitImm = true;
+    break;
   case Instruction::Mul:
+    // Negated power of 2 is a shift and a negate.
+    if (Imm.isNegatedPowerOf2())
+      return TTI::TCC_Free;
+    // FIXME: There is no MULI instruction.
     Takes12BitImm = true;
     break;
   case Instruction::Sub:
@@ -132,17 +138,15 @@ bool RISCVTTIImpl::shouldExpandReduction(const IntrinsicInst *II) const {
 }
 
 Optional<unsigned> RISCVTTIImpl::getMaxVScale() const {
-  // There is no assumption of the maximum vector length in V specification.
-  // We use the value specified by users as the maximum vector length.
-  // This function will use the assumed maximum vector length to get the
-  // maximum vscale for LoopVectorizer.
-  // If users do not specify the maximum vector length, we have no way to
-  // know whether the LoopVectorizer is safe to do or not.
-  // We only consider to use single vector register (LMUL = 1) to vectorize.
-  unsigned MaxVectorSizeInBits = ST->getMaxRVVVectorSizeInBits();
-  if (ST->hasVInstructions() && MaxVectorSizeInBits != 0)
-    return MaxVectorSizeInBits / RISCV::RVVBitsPerBlock;
+  if (ST->hasVInstructions())
+    return ST->getRealMaxVLen() / RISCV::RVVBitsPerBlock;
   return BaseT::getMaxVScale();
+}
+
+Optional<unsigned> RISCVTTIImpl::getVScaleForTuning() const {
+  if (ST->hasVInstructions())
+    return ST->getRealMinVLen() / RISCV::RVVBitsPerBlock;
+  return BaseT::getVScaleForTuning();
 }
 
 TypeSize
@@ -154,7 +158,7 @@ RISCVTTIImpl::getRegisterBitWidth(TargetTransformInfo::RegisterKind K) const {
     return TypeSize::getFixed(ST->getXLen());
   case TargetTransformInfo::RGK_FixedWidthVector:
     return TypeSize::getFixed(
-        ST->hasVInstructions() ? LMUL * ST->getMinRVVVectorSizeInBits() : 0);
+        ST->useRVVForFixedLengthVectors() ? LMUL * ST->getRealMinVLen() : 0);
   case TargetTransformInfo::RGK_ScalableVector:
     return TypeSize::getScalable(
         ST->hasVInstructions() ? LMUL * RISCV::RVVBitsPerBlock : 0);
@@ -176,9 +180,37 @@ InstructionCost RISCVTTIImpl::getSpliceCost(VectorType *Tp, int Index) {
 InstructionCost RISCVTTIImpl::getShuffleCost(TTI::ShuffleKind Kind,
                                              VectorType *Tp, ArrayRef<int> Mask,
                                              int Index, VectorType *SubTp,
-                                             ArrayRef<Value *> Args) {
-  if (Kind == TTI::SK_Splice && isa<ScalableVectorType>(Tp))
-    return getSpliceCost(Tp, Index);
+                                             ArrayRef<const Value *> Args) {
+  if (isa<ScalableVectorType>(Tp)) {
+    std::pair<InstructionCost, MVT> LT = TLI->getTypeLegalizationCost(DL, Tp);
+    switch (Kind) {
+    default:
+      // Fallthrough to generic handling.
+      // TODO: Most of these cases will return getInvalid in generic code, and
+      // must be implemented here.
+      break;
+    case TTI::SK_Broadcast: {
+      return LT.first * 1;
+    }
+    case TTI::SK_Splice:
+      return getSpliceCost(Tp, Index);
+    case TTI::SK_Reverse:
+      // Most of the cost here is producing the vrgather index register
+      // Example sequence:
+      //   csrr a0, vlenb
+      //   srli a0, a0, 3
+      //   addi a0, a0, -1
+      //   vsetvli a1, zero, e8, mf8, ta, mu (ignored)
+      //   vid.v v9
+      //   vrsub.vx v10, v9, a0
+      //   vrgather.vv v9, v8, v10
+      if (Tp->getElementType()->isIntegerTy(1))
+        // Mask operation additionally required extend and truncate
+        return LT.first * 9;
+      return LT.first * 6;
+    }
+  }
+
   return BaseT::getShuffleCost(Kind, Tp, Mask, Index, SubTp);
 }
 
@@ -207,15 +239,13 @@ InstructionCost RISCVTTIImpl::getGatherScatterOpCost(
     return BaseT::getGatherScatterOpCost(Opcode, DataTy, Ptr, VariableMask,
                                          Alignment, CostKind, I);
 
-  // FIXME: Only supporting fixed vectors for now.
-  if (!isa<FixedVectorType>(DataTy))
-    return BaseT::getGatherScatterOpCost(Opcode, DataTy, Ptr, VariableMask,
-                                         Alignment, CostKind, I);
-
-  auto *VTy = cast<FixedVectorType>(DataTy);
-  unsigned NumLoads = VTy->getNumElements();
-  InstructionCost MemOpCost =
-      getMemoryOpCost(Opcode, VTy->getElementType(), Alignment, 0, CostKind, I);
+  // Cost is proportional to the number of memory operations implied.  For
+  // scalable vectors, we use an upper bound on that number since we don't
+  // know exactly what VL will be.
+  auto &VTy = *cast<VectorType>(DataTy);
+  InstructionCost MemOpCost = getMemoryOpCost(Opcode, VTy.getElementType(),
+                                              Alignment, 0, CostKind, I);
+  unsigned NumLoads = getMaxVLFor(&VTy);
   return NumLoads * MemOpCost;
 }
 
@@ -260,8 +290,24 @@ InstructionCost RISCVTTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst,
     switch (ISD) {
     case ISD::SIGN_EXTEND:
     case ISD::ZERO_EXTEND:
+      if (Src->getScalarSizeInBits() == 1) {
+        // We do not use vsext/vzext to extend from mask vector.
+        // Instead we use the following instructions to extend from mask vector:
+        // vmv.v.i v8, 0
+        // vmerge.vim v8, v8, -1, v0
+        return 2;
+      }
       return 1;
     case ISD::TRUNCATE:
+      if (Dst->getScalarSizeInBits() == 1) {
+        // We do not use several vncvt to truncate to mask vector. So we could
+        // not use PowDiff to calculate it.
+        // Instead we use the following instructions to truncate to mask vector:
+        // vand.vi v8, v8, 1
+        // vmsne.vi v0, v8, 0
+        return 2;
+      }
+      [[fallthrough]];
     case ISD::FP_EXTEND:
     case ISD::FP_ROUND:
       // Counts of narrow/widen instructions.
@@ -270,6 +316,20 @@ InstructionCost RISCVTTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst,
     case ISD::FP_TO_UINT:
     case ISD::SINT_TO_FP:
     case ISD::UINT_TO_FP:
+      if (Src->getScalarSizeInBits() == 1 || Dst->getScalarSizeInBits() == 1) {
+        // The cost of convert from or to mask vector is different from other
+        // cases. We could not use PowDiff to calculate it.
+        // For mask vector to fp, we should use the following instructions:
+        // vmv.v.i v8, 0
+        // vmerge.vim v8, v8, -1, v0
+        // vfcvt.f.x.v v8, v8
+
+        // And for fp vector to mask, we use:
+        // vfncvt.rtz.x.f.w v9, v8
+        // vand.vi v8, v9, 1
+        // vmsne.vi v0, v8, 0
+        return 3;
+      }
       if (std::abs(PowDiff) <= 1)
         return 1;
       // Backend could lower (v[sz]ext i8 to double) to vfcvt(v[sz]ext.f8 i8),
@@ -283,62 +343,94 @@ InstructionCost RISCVTTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst,
   return BaseT::getCastInstrCost(Opcode, Dst, Src, CCH, CostKind, I);
 }
 
+unsigned RISCVTTIImpl::getMaxVLFor(VectorType *Ty) {
+  if (isa<ScalableVectorType>(Ty)) {
+    const unsigned EltSize = DL.getTypeSizeInBits(Ty->getElementType());
+    const unsigned MinSize = DL.getTypeSizeInBits(Ty).getKnownMinValue();
+    const unsigned VectorBitsMax = ST->getRealMaxVLen();
+    return RISCVTargetLowering::computeVLMAX(VectorBitsMax, EltSize, MinSize);
+  }
+  return cast<FixedVectorType>(Ty)->getNumElements();
+}
+
 InstructionCost
 RISCVTTIImpl::getMinMaxReductionCost(VectorType *Ty, VectorType *CondTy,
                                      bool IsUnsigned,
                                      TTI::TargetCostKind CostKind) {
-  // FIXME: Only supporting fixed vectors for now.
-  if (!isa<FixedVectorType>(Ty))
-    return BaseT::getMinMaxReductionCost(Ty, CondTy, IsUnsigned, CostKind);
-
-  if (!ST->useRVVForFixedLengthVectors())
+  if (isa<FixedVectorType>(Ty) && !ST->useRVVForFixedLengthVectors())
     return BaseT::getMinMaxReductionCost(Ty, CondTy, IsUnsigned, CostKind);
 
   // Skip if scalar size of Ty is bigger than ELEN.
   if (Ty->getScalarSizeInBits() > ST->getELEN())
     return BaseT::getMinMaxReductionCost(Ty, CondTy, IsUnsigned, CostKind);
 
+  std::pair<InstructionCost, MVT> LT = TLI->getTypeLegalizationCost(DL, Ty);
+  if (Ty->getElementType()->isIntegerTy(1))
+    // vcpop sequences, see vreduction-mask.ll.  umax, smin actually only
+    // cost 2, but we don't have enough info here so we slightly over cost.
+    return (LT.first - 1) + 3;
+
   // IR Reduction is composed by two vmv and one rvv reduction instruction.
   InstructionCost BaseCost = 2;
-  unsigned VL = cast<FixedVectorType>(Ty)->getNumElements();
-  std::pair<InstructionCost, MVT> LT = TLI->getTypeLegalizationCost(DL, Ty);
+  unsigned VL = getMaxVLFor(Ty);
   return (LT.first - 1) + BaseCost + Log2_32_Ceil(VL);
 }
 
 InstructionCost
-RISCVTTIImpl::getArithmeticReductionCost(unsigned Opcode, VectorType *VTy,
+RISCVTTIImpl::getArithmeticReductionCost(unsigned Opcode, VectorType *Ty,
                                          Optional<FastMathFlags> FMF,
                                          TTI::TargetCostKind CostKind) {
-  // FIXME: Only supporting fixed vectors for now.
-  if (!isa<FixedVectorType>(VTy))
-    return BaseT::getArithmeticReductionCost(Opcode, VTy, FMF, CostKind);
+  if (isa<FixedVectorType>(Ty) && !ST->useRVVForFixedLengthVectors())
+    return BaseT::getArithmeticReductionCost(Opcode, Ty, FMF, CostKind);
 
-  // FIXME: Do not support i1 and/or reduction now.
-  if (VTy->getElementType()->isIntegerTy(1))
-    return BaseT::getArithmeticReductionCost(Opcode, VTy, FMF, CostKind);
-
-  if (!ST->useRVVForFixedLengthVectors())
-    return BaseT::getArithmeticReductionCost(Opcode, VTy, FMF, CostKind);
-
-  // Skip if scalar size of VTy is bigger than ELEN.
-  if (VTy->getScalarSizeInBits() > ST->getELEN())
-    return BaseT::getArithmeticReductionCost(Opcode, VTy, FMF, CostKind);
+  // Skip if scalar size of Ty is bigger than ELEN.
+  if (Ty->getScalarSizeInBits() > ST->getELEN())
+    return BaseT::getArithmeticReductionCost(Opcode, Ty, FMF, CostKind);
 
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
   assert(ISD && "Invalid opcode");
 
   if (ISD != ISD::ADD && ISD != ISD::OR && ISD != ISD::XOR && ISD != ISD::AND &&
       ISD != ISD::FADD)
-    return BaseT::getArithmeticReductionCost(Opcode, VTy, FMF, CostKind);
+    return BaseT::getArithmeticReductionCost(Opcode, Ty, FMF, CostKind);
+
+  std::pair<InstructionCost, MVT> LT = TLI->getTypeLegalizationCost(DL, Ty);
+  if (Ty->getElementType()->isIntegerTy(1))
+    // vcpop sequences, see vreduction-mask.ll
+    return (LT.first - 1) + (ISD == ISD::AND ? 3 : 2);
 
   // IR Reduction is composed by two vmv and one rvv reduction instruction.
   InstructionCost BaseCost = 2;
-  unsigned VL = cast<FixedVectorType>(VTy)->getNumElements();
-  std::pair<InstructionCost, MVT> LT = TLI->getTypeLegalizationCost(DL, VTy);
-
+  unsigned VL = getMaxVLFor(Ty);
   if (TTI::requiresOrderedReduction(FMF))
     return (LT.first - 1) + BaseCost + VL;
   return (LT.first - 1) + BaseCost + Log2_32_Ceil(VL);
+}
+
+InstructionCost RISCVTTIImpl::getExtendedReductionCost(
+    unsigned Opcode, bool IsUnsigned, Type *ResTy, VectorType *ValTy,
+    Optional<FastMathFlags> FMF, TTI::TargetCostKind CostKind) {
+  if (isa<FixedVectorType>(ValTy) && !ST->useRVVForFixedLengthVectors())
+    return BaseT::getExtendedReductionCost(Opcode, IsUnsigned, ResTy, ValTy,
+                                           FMF, CostKind);
+
+  // Skip if scalar size of ResTy is bigger than ELEN.
+  if (ResTy->getScalarSizeInBits() > ST->getELEN())
+    return BaseT::getExtendedReductionCost(Opcode, IsUnsigned, ResTy, ValTy,
+                                           FMF, CostKind);
+
+  if (Opcode != Instruction::Add && Opcode != Instruction::FAdd)
+    return BaseT::getExtendedReductionCost(Opcode, IsUnsigned, ResTy, ValTy,
+                                           FMF, CostKind);
+
+  std::pair<InstructionCost, MVT> LT = TLI->getTypeLegalizationCost(DL, ValTy);
+
+  if (ResTy->getScalarSizeInBits() != 2 * LT.second.getScalarSizeInBits())
+    return BaseT::getExtendedReductionCost(Opcode, IsUnsigned, ResTy, ValTy,
+                                           FMF, CostKind);
+
+  return (LT.first - 1) +
+         getArithmeticReductionCost(Opcode, ValTy, FMF, CostKind);
 }
 
 void RISCVTTIImpl::getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
@@ -347,13 +439,8 @@ void RISCVTTIImpl::getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
   // TODO: More tuning on benchmarks and metrics with changes as needed
   //       would apply to all settings below to enable performance.
 
-  // Support explicit targets enabled for SiFive with the unrolling preferences
-  // below
-  bool UseDefaultPreferences = true;
-  if (ST->getProcFamily() == RISCVSubtarget::SiFive7)
-    UseDefaultPreferences = false;
 
-  if (UseDefaultPreferences)
+  if (ST->enableDefaultUnroll())
     return BasicTTIImplBase::getUnrollingPreferences(L, SE, UP, ORE);
 
   // Enable Upper bound unrolling universally, not dependant upon the conditions
@@ -429,14 +516,14 @@ void RISCVTTIImpl::getPeelingPreferences(Loop *L, ScalarEvolution &SE,
   BaseT::getPeelingPreferences(L, SE, PP);
 }
 
-InstructionCost RISCVTTIImpl::getRegUsageForType(Type *Ty) {
+unsigned RISCVTTIImpl::getRegUsageForType(Type *Ty) {
   TypeSize Size = Ty->getPrimitiveSizeInBits();
   if (Ty->isVectorTy()) {
     if (Size.isScalable() && ST->hasVInstructions())
       return divideCeil(Size.getKnownMinValue(), RISCV::RVVBitsPerBlock);
 
     if (ST->useRVVForFixedLengthVectors())
-      return divideCeil(Size, ST->getMinRVVVectorSizeInBits());
+      return divideCeil(Size, ST->getRealMinVLen());
   }
 
   return BaseT::getRegUsageForType(Ty);

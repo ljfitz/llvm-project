@@ -395,7 +395,7 @@ void StructurizeCFG::orderNodes() {
         WorkList.emplace_back(I, I + Size);
 
       // Add the SCC nodes to the Order array.
-      for (auto &N : SCC) {
+      for (const auto &N : SCC) {
         assert(I < E && "SCC size mismatch!");
         Order[I++] = N.first;
       }
@@ -681,7 +681,7 @@ void StructurizeCFG::simplifyAffectedPhis() {
     Q.DT = DT;
     for (WeakVH VH : AffectedPhis) {
       if (auto Phi = dyn_cast_or_null<PHINode>(VH)) {
-        if (auto NewValue = SimplifyInstruction(Phi, Q)) {
+        if (auto NewValue = simplifyInstruction(Phi, Q)) {
           Phi->replaceAllUsesWith(NewValue);
           Phi->eraseFromParent();
           Changed = true;
