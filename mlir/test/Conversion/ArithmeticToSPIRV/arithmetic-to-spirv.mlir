@@ -6,7 +6,7 @@
 
 module attributes {
   spv.target_env = #spv.target_env<
-    #spv.vce<v1.0, [Int8, Int16, Int64, Float16, Float64, Shader], []>, {}>
+    #spv.vce<v1.0, [Int8, Int16, Int64, Float16, Float64, Shader], []>, #spv.resource_limits<>>
 } {
 
 // Check integer operation conversions.
@@ -27,16 +27,48 @@ func.func @int32_scalar(%lhs: i32, %rhs: i32) {
   return
 }
 
-// CHECK-LABEL: @scalar_srem
+// CHECK-LABEL: @int32_scalar_srem
 // CHECK-SAME: (%[[LHS:.+]]: i32, %[[RHS:.+]]: i32)
-func.func @scalar_srem(%lhs: i32, %rhs: i32) {
-  // CHECK: %[[LABS:.+]] = spv.GLSL.SAbs %[[LHS]] : i32
-  // CHECK: %[[RABS:.+]] = spv.GLSL.SAbs %[[RHS]] : i32
+func.func @int32_scalar_srem(%lhs: i32, %rhs: i32) {
+  // CHECK: %[[LABS:.+]] = spv.GL.SAbs %[[LHS]] : i32
+  // CHECK: %[[RABS:.+]] = spv.GL.SAbs %[[RHS]] : i32
   // CHECK:  %[[ABS:.+]] = spv.UMod %[[LABS]], %[[RABS]] : i32
   // CHECK:  %[[POS:.+]] = spv.IEqual %[[LHS]], %[[LABS]] : i32
   // CHECK:  %[[NEG:.+]] = spv.SNegate %[[ABS]] : i32
   // CHECK:      %{{.+}} = spv.Select %[[POS]], %[[ABS]], %[[NEG]] : i1, i32
   %0 = arith.remsi %lhs, %rhs: i32
+  return
+}
+
+// CHECK-LABEL: @index_scalar
+func.func @index_scalar(%lhs: index, %rhs: index) {
+  // CHECK: spv.IAdd %{{.*}}, %{{.*}}: i32
+  %0 = arith.addi %lhs, %rhs: index
+  // CHECK: spv.ISub %{{.*}}, %{{.*}}: i32
+  %1 = arith.subi %lhs, %rhs: index
+  // CHECK: spv.IMul %{{.*}}, %{{.*}}: i32
+  %2 = arith.muli %lhs, %rhs: index
+  // CHECK: spv.SDiv %{{.*}}, %{{.*}}: i32
+  %3 = arith.divsi %lhs, %rhs: index
+  // CHECK: spv.UDiv %{{.*}}, %{{.*}}: i32
+  %4 = arith.divui %lhs, %rhs: index
+  // CHECK: spv.UMod %{{.*}}, %{{.*}}: i32
+  %5 = arith.remui %lhs, %rhs: index
+  return
+}
+
+// CHECK-LABEL: @index_scalar_srem
+// CHECK-SAME: (%[[A:.+]]: index, %[[B:.+]]: index)
+func.func @index_scalar_srem(%lhs: index, %rhs: index) {
+  // CHECK: %[[LHS:.+]] = builtin.unrealized_conversion_cast %[[A]] : index to i32
+  // CHECK: %[[RHS:.+]] = builtin.unrealized_conversion_cast %[[B]] : index to i32
+  // CHECK: %[[LABS:.+]] = spv.GL.SAbs %[[LHS]] : i32
+  // CHECK: %[[RABS:.+]] = spv.GL.SAbs %[[RHS]] : i32
+  // CHECK:  %[[ABS:.+]] = spv.UMod %[[LABS]], %[[RABS]] : i32
+  // CHECK:  %[[POS:.+]] = spv.IEqual %[[LHS]], %[[LABS]] : i32
+  // CHECK:  %[[NEG:.+]] = spv.SNegate %[[ABS]] : i32
+  // CHECK:      %{{.+}} = spv.Select %[[POS]], %[[ABS]], %[[NEG]] : i1, i32
+  %0 = arith.remsi %lhs, %rhs: index
   return
 }
 
@@ -77,8 +109,8 @@ func.func @int_vector234(%arg0: vector<2xi8>, %arg1: vector<4xi64>) {
 // CHECK-LABEL: @vector_srem
 // CHECK-SAME: (%[[LHS:.+]]: vector<3xi16>, %[[RHS:.+]]: vector<3xi16>)
 func.func @vector_srem(%arg0: vector<3xi16>, %arg1: vector<3xi16>) {
-  // CHECK: %[[LABS:.+]] = spv.GLSL.SAbs %[[LHS]] : vector<3xi16>
-  // CHECK: %[[RABS:.+]] = spv.GLSL.SAbs %[[RHS]] : vector<3xi16>
+  // CHECK: %[[LABS:.+]] = spv.GL.SAbs %[[LHS]] : vector<3xi16>
+  // CHECK: %[[RABS:.+]] = spv.GL.SAbs %[[RHS]] : vector<3xi16>
   // CHECK:  %[[ABS:.+]] = spv.UMod %[[LABS]], %[[RABS]] : vector<3xi16>
   // CHECK:  %[[POS:.+]] = spv.IEqual %[[LHS]], %[[LABS]] : vector<3xi16>
   // CHECK:  %[[NEG:.+]] = spv.SNegate %[[ABS]] : vector<3xi16>
@@ -124,7 +156,7 @@ func.func @unsupported_2x2elem_vector(%arg0: vector<2x2xi32>) {
 
 // Check that types are converted to 32-bit when no special capabilities.
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @int_vector23
@@ -152,13 +184,11 @@ func.func @float_scalar(%arg0: f16, %arg1: f64) {
 // Check that types are converted to 32-bit when no special capabilities that
 // are not supported.
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, #spv.resource_limits<>>
 } {
 
-// expected-error @+1 {{failed to materialize conversion for block argument #0 that remained live after conversion, type was 'vector<4xi64>', with target type 'vector<4xi32>'}}
 func.func @int_vector4_invalid(%arg0: vector<4xi64>) {
-  // expected-error @+2 {{bitwidth emulation is not implemented yet on unsigned op}}
-  // expected-note @+1 {{see existing live user here}}
+  // expected-error @+1 {{bitwidth emulation is not implemented yet on unsigned op}}
   %0 = arith.divui %arg0, %arg0: vector<4xi64>
   return
 }
@@ -172,7 +202,7 @@ func.func @int_vector4_invalid(%arg0: vector<4xi64>) {
 //===----------------------------------------------------------------------===//
 
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @bitwise_scalar
@@ -250,7 +280,7 @@ func.func @shift_vector(%arg0 : vector<4xi32>, %arg1 : vector<4xi32>) {
 //===----------------------------------------------------------------------===//
 
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @cmpf
@@ -288,7 +318,7 @@ func.func @cmpf(%arg0 : f32, %arg1 : f32) {
 
 // With Kernel capability, we can convert NaN check to spv.Ordered/spv.Unordered.
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [Kernel], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [Kernel], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @cmpf
@@ -306,7 +336,7 @@ func.func @cmpf(%arg0 : f32, %arg1 : f32) {
 
 // Without Kernel capability, we need to convert NaN check to spv.IsNan.
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @cmpf
@@ -334,7 +364,7 @@ func.func @cmpf(%arg0 : f32, %arg1 : f32) {
 //===----------------------------------------------------------------------===//
 
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @cmpi
@@ -362,8 +392,17 @@ func.func @cmpi(%arg0 : i32, %arg1 : i32) {
   return
 }
 
-// CHECK-LABEL: @boolcmpi
-func.func @boolcmpi(%arg0 : i1, %arg1 : i1) {
+// CHECK-LABEL: @vec1cmpi
+func.func @vec1cmpi(%arg0 : vector<1xi32>, %arg1 : vector<1xi32>) {
+  // CHECK: spv.ULessThan
+  %0 = arith.cmpi ult, %arg0, %arg1 : vector<1xi32>
+  // CHECK: spv.SGreaterThan
+  %1 = arith.cmpi sgt, %arg0, %arg1 : vector<1xi32>
+  return
+}
+
+// CHECK-LABEL: @boolcmpi_equality
+func.func @boolcmpi_equality(%arg0 : i1, %arg1 : i1) {
   // CHECK: spv.LogicalEqual
   %0 = arith.cmpi eq, %arg0, %arg1 : i1
   // CHECK: spv.LogicalNotEqual
@@ -371,14 +410,57 @@ func.func @boolcmpi(%arg0 : i1, %arg1 : i1) {
   return
 }
 
-// CHECK-LABEL: @vecboolcmpi
-func.func @vecboolcmpi(%arg0 : vector<4xi1>, %arg1 : vector<4xi1>) {
+// CHECK-LABEL: @boolcmpi_unsigned
+func.func @boolcmpi_unsigned(%arg0 : i1, %arg1 : i1) {
+  // CHECK-COUNT-2: spv.Select
+  // CHECK: spv.UGreaterThanEqual
+  %0 = arith.cmpi uge, %arg0, %arg1 : i1
+  // CHECK-COUNT-2: spv.Select
+  // CHECK: spv.ULessThan
+  %1 = arith.cmpi ult, %arg0, %arg1 : i1
+  return
+}
+
+// CHECK-LABEL: @vec1boolcmpi_equality
+func.func @vec1boolcmpi_equality(%arg0 : vector<1xi1>, %arg1 : vector<1xi1>) {
+  // CHECK: spv.LogicalEqual
+  %0 = arith.cmpi eq, %arg0, %arg1 : vector<1xi1>
+  // CHECK: spv.LogicalNotEqual
+  %1 = arith.cmpi ne, %arg0, %arg1 : vector<1xi1>
+  return
+}
+
+// CHECK-LABEL: @vec1boolcmpi_unsigned
+func.func @vec1boolcmpi_unsigned(%arg0 : vector<1xi1>, %arg1 : vector<1xi1>) {
+  // CHECK-COUNT-2: spv.Select
+  // CHECK: spv.UGreaterThanEqual
+  %0 = arith.cmpi uge, %arg0, %arg1 : vector<1xi1>
+  // CHECK-COUNT-2: spv.Select
+  // CHECK: spv.ULessThan
+  %1 = arith.cmpi ult, %arg0, %arg1 : vector<1xi1>
+  return
+}
+
+// CHECK-LABEL: @vecboolcmpi_equality
+func.func @vecboolcmpi_equality(%arg0 : vector<4xi1>, %arg1 : vector<4xi1>) {
   // CHECK: spv.LogicalEqual
   %0 = arith.cmpi eq, %arg0, %arg1 : vector<4xi1>
   // CHECK: spv.LogicalNotEqual
   %1 = arith.cmpi ne, %arg0, %arg1 : vector<4xi1>
   return
 }
+
+// CHECK-LABEL: @vecboolcmpi_unsigned
+func.func @vecboolcmpi_unsigned(%arg0 : vector<3xi1>, %arg1 : vector<3xi1>) {
+  // CHECK-COUNT-2: spv.Select
+  // CHECK: spv.UGreaterThanEqual
+  %0 = arith.cmpi uge, %arg0, %arg1 : vector<3xi1>
+  // CHECK-COUNT-2: spv.Select
+  // CHECK: spv.ULessThan
+  %1 = arith.cmpi ult, %arg0, %arg1 : vector<3xi1>
+  return
+}
+
 
 } // end module
 
@@ -390,7 +472,7 @@ func.func @vecboolcmpi(%arg0 : vector<4xi1>, %arg1 : vector<4xi1>) {
 
 module attributes {
   spv.target_env = #spv.target_env<
-    #spv.vce<v1.0, [Int8, Int16, Int64, Float16, Float64], []>, {}>
+    #spv.vce<v1.0, [Int8, Int16, Int64, Float16, Float64], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @constant
@@ -405,17 +487,17 @@ func.func @constant() {
   %3 = arith.constant dense<[2, 3]> : vector<2xi32>
   // CHECK: spv.Constant 1 : i32
   %4 = arith.constant 1 : index
-  // CHECK: spv.Constant dense<1> : tensor<6xi32> : !spv.array<6 x i32, stride=4>
+  // CHECK: spv.Constant dense<1> : tensor<6xi32> : !spv.array<6 x i32>
   %5 = arith.constant dense<1> : tensor<2x3xi32>
-  // CHECK: spv.Constant dense<1.000000e+00> : tensor<6xf32> : !spv.array<6 x f32, stride=4>
+  // CHECK: spv.Constant dense<1.000000e+00> : tensor<6xf32> : !spv.array<6 x f32>
   %6 = arith.constant dense<1.0> : tensor<2x3xf32>
-  // CHECK: spv.Constant dense<{{\[}}1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00, 5.000000e+00, 6.000000e+00]> : tensor<6xf32> : !spv.array<6 x f32, stride=4>
+  // CHECK: spv.Constant dense<{{\[}}1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00, 5.000000e+00, 6.000000e+00]> : tensor<6xf32> : !spv.array<6 x f32>
   %7 = arith.constant dense<[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]> : tensor<2x3xf32>
-  // CHECK: spv.Constant dense<{{\[}}1, 2, 3, 4, 5, 6]> : tensor<6xi32> : !spv.array<6 x i32, stride=4>
+  // CHECK: spv.Constant dense<{{\[}}1, 2, 3, 4, 5, 6]> : tensor<6xi32> : !spv.array<6 x i32>
   %8 = arith.constant dense<[[1, 2, 3], [4, 5, 6]]> : tensor<2x3xi32>
-  // CHECK: spv.Constant dense<{{\[}}1, 2, 3, 4, 5, 6]> : tensor<6xi32> : !spv.array<6 x i32, stride=4>
+  // CHECK: spv.Constant dense<{{\[}}1, 2, 3, 4, 5, 6]> : tensor<6xi32> : !spv.array<6 x i32>
   %9 =  arith.constant dense<[[1, 2], [3, 4], [5, 6]]> : tensor<3x2xi32>
-  // CHECK: spv.Constant dense<{{\[}}1, 2, 3, 4, 5, 6]> : tensor<6xi32> : !spv.array<6 x i32, stride=4>
+  // CHECK: spv.Constant dense<{{\[}}1, 2, 3, 4, 5, 6]> : tensor<6xi32> : !spv.array<6 x i32>
   %10 =  arith.constant dense<[1, 2, 3, 4, 5, 6]> : tensor<6xi32>
   return
 }
@@ -428,7 +510,7 @@ func.func @constant_16bit() {
   %1 = arith.constant 5.0 : f16
   // CHECK: spv.Constant dense<[2, 3]> : vector<2xi16>
   %2 = arith.constant dense<[2, 3]> : vector<2xi16>
-  // CHECK: spv.Constant dense<4.000000e+00> : tensor<5xf16> : !spv.array<5 x f16, stride=2>
+  // CHECK: spv.Constant dense<4.000000e+00> : tensor<5xf16> : !spv.array<5 x f16>
   %3 = arith.constant dense<4.0> : tensor<5xf16>
   return
 }
@@ -441,7 +523,7 @@ func.func @constant_64bit() {
   %1 = arith.constant 5.0 : f64
   // CHECK: spv.Constant dense<[2, 3]> : vector<2xi64>
   %2 = arith.constant dense<[2, 3]> : vector<2xi64>
-  // CHECK: spv.Constant dense<4.000000e+00> : tensor<5xf64> : !spv.array<5 x f64, stride=8>
+  // CHECK: spv.Constant dense<4.000000e+00> : tensor<5xf64> : !spv.array<5 x f64>
   %3 = arith.constant dense<4.0> : tensor<5xf64>
   return
 }
@@ -463,7 +545,7 @@ func.func @constant_size1() {
 
 // Check that constants are converted to 32-bit when no special capability.
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @constant_16bit
@@ -474,9 +556,9 @@ func.func @constant_16bit() {
   %1 = arith.constant 5.0 : f16
   // CHECK: spv.Constant dense<[2, 3]> : vector<2xi32>
   %2 = arith.constant dense<[2, 3]> : vector<2xi16>
-  // CHECK: spv.Constant dense<4.000000e+00> : tensor<5xf32> : !spv.array<5 x f32, stride=4>
+  // CHECK: spv.Constant dense<4.000000e+00> : tensor<5xf32> : !spv.array<5 x f32>
   %3 = arith.constant dense<4.0> : tensor<5xf16>
-  // CHECK: spv.Constant dense<[1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00]> : tensor<4xf32> : !spv.array<4 x f32, stride=4>
+  // CHECK: spv.Constant dense<[1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00]> : tensor<4xf32> : !spv.array<4 x f32>
   %4 = arith.constant dense<[[1.0, 2.0], [3.0, 4.0]]> : tensor<2x2xf16>
   return
 }
@@ -489,9 +571,9 @@ func.func @constant_64bit() {
   %1 = arith.constant 5.0 : f64
   // CHECK: spv.Constant dense<[2, 3]> : vector<2xi32>
   %2 = arith.constant dense<[2, 3]> : vector<2xi64>
-  // CHECK: spv.Constant dense<4.000000e+00> : tensor<5xf32> : !spv.array<5 x f32, stride=4>
+  // CHECK: spv.Constant dense<4.000000e+00> : tensor<5xf32> : !spv.array<5 x f32>
   %3 = arith.constant dense<4.0> : tensor<5xf64>
-  // CHECK: spv.Constant dense<[1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00]> : tensor<4xf32> : !spv.array<4 x f32, stride=4>
+  // CHECK: spv.Constant dense<[1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00]> : tensor<4xf32> : !spv.array<4 x f32>
   %4 = arith.constant dense<[[1.0, 2.0], [3.0, 4.0]]> : tensor<2x2xf16>
   return
 }
@@ -555,7 +637,7 @@ func.func @unsupported_cases() {
 
 module attributes {
   spv.target_env = #spv.target_env<
-    #spv.vce<v1.0, [Int8, Int16, Int64, Float16, Float64], []>, {}>
+    #spv.vce<v1.0, [Int8, Int16, Int64, Float16, Float64], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: index_cast1
@@ -803,12 +885,13 @@ func.func @fptosi2(%arg0 : f16) -> i16 {
 // Checks that cast types will be adjusted when missing special capabilities for
 // certain non-32-bit scalar types.
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [Float64], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [Float64], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @fpext1
-// CHECK-SAME: %[[ARG:.*]]: f32
+// CHECK-SAME: %[[A:.*]]: f16
 func.func @fpext1(%arg0: f16) -> f64 {
+  // CHECK: %[[ARG:.+]] = builtin.unrealized_conversion_cast %[[A]] : f16 to f32
   // CHECK-NEXT: spv.FConvert %[[ARG]] : f32 to f64
   %0 = arith.extf %arg0 : f16 to f64
   return %0: f64
@@ -829,12 +912,13 @@ func.func @fpext2(%arg0 : f32) -> f64 {
 // Checks that cast types will be adjusted when missing special capabilities for
 // certain non-32-bit scalar types.
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [Float16], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [Float16], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @fptrunc1
-// CHECK-SAME: %[[ARG:.*]]: f32
+// CHECK-SAME: %[[A:.*]]: f64
 func.func @fptrunc1(%arg0 : f64) -> f16 {
+  // CHECK: %[[ARG:.+]] = builtin.unrealized_conversion_cast %[[A]] : f64 to f32
   // CHECK-NEXT: spv.FConvert %[[ARG]] : f32 to f16
   %0 = arith.truncf %arg0 : f64 to f16
   return %0: f16
@@ -862,14 +946,14 @@ func.func @sitofp(%arg0 : i64) -> f64 {
 // Check OpenCL lowering of arith.remsi
 module attributes {
   spv.target_env = #spv.target_env<
-    #spv.vce<v1.0, [Int16, Kernel], []>, {}>
+    #spv.vce<v1.0, [Int16, Kernel], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @scalar_srem
 // CHECK-SAME: (%[[LHS:.+]]: i32, %[[RHS:.+]]: i32)
 func.func @scalar_srem(%lhs: i32, %rhs: i32) {
-  // CHECK: %[[LABS:.+]] = spv.OCL.s_abs %[[LHS]] : i32
-  // CHECK: %[[RABS:.+]] = spv.OCL.s_abs %[[RHS]] : i32
+  // CHECK: %[[LABS:.+]] = spv.CL.s_abs %[[LHS]] : i32
+  // CHECK: %[[RABS:.+]] = spv.CL.s_abs %[[RHS]] : i32
   // CHECK:  %[[ABS:.+]] = spv.UMod %[[LABS]], %[[RABS]] : i32
   // CHECK:  %[[POS:.+]] = spv.IEqual %[[LHS]], %[[LABS]] : i32
   // CHECK:  %[[NEG:.+]] = spv.SNegate %[[ABS]] : i32
@@ -881,8 +965,8 @@ func.func @scalar_srem(%lhs: i32, %rhs: i32) {
 // CHECK-LABEL: @vector_srem
 // CHECK-SAME: (%[[LHS:.+]]: vector<3xi16>, %[[RHS:.+]]: vector<3xi16>)
 func.func @vector_srem(%arg0: vector<3xi16>, %arg1: vector<3xi16>) {
-  // CHECK: %[[LABS:.+]] = spv.OCL.s_abs %[[LHS]] : vector<3xi16>
-  // CHECK: %[[RABS:.+]] = spv.OCL.s_abs %[[RHS]] : vector<3xi16>
+  // CHECK: %[[LABS:.+]] = spv.CL.s_abs %[[LHS]] : vector<3xi16>
+  // CHECK: %[[RABS:.+]] = spv.CL.s_abs %[[RHS]] : vector<3xi16>
   // CHECK:  %[[ABS:.+]] = spv.UMod %[[LABS]], %[[RABS]] : vector<3xi16>
   // CHECK:  %[[POS:.+]] = spv.IEqual %[[LHS]], %[[LABS]] : vector<3xi16>
   // CHECK:  %[[NEG:.+]] = spv.SNegate %[[ABS]] : vector<3xi16>
@@ -898,7 +982,7 @@ func.func @vector_srem(%arg0: vector<3xi16>, %arg1: vector<3xi16>) {
 module attributes {
   spv.target_env = #spv.target_env<
     #spv.vce<v1.0, [Shader, Int8, Int16, Int64, Float16, Float64],
-             [SPV_KHR_storage_buffer_storage_class]>, {}>
+             [SPV_KHR_storage_buffer_storage_class]>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @select
@@ -919,7 +1003,7 @@ func.func @select(%arg0 : i32, %arg1 : i32) {
 
 module attributes {
   spv.target_env = #spv.target_env<
-    #spv.vce<v1.0, [Int8, Int16, Int64, Float16, Float64, Shader], []>, {}>
+    #spv.vce<v1.0, [Int8, Int16, Int64, Float16, Float64, Shader], []>, #spv.resource_limits<>>
 } {
 
 // Check integer operation conversions.
@@ -937,13 +1021,13 @@ func.func @int32_scalar(%lhs: i32, %rhs: i32) {
   %4 = arith.divui %lhs, %rhs: i32
   // CHECK: spv.UMod %{{.*}}, %{{.*}}: i32
   %5 = arith.remui %lhs, %rhs: i32
-  // CHECK: spv.GLSL.SMax %{{.*}}, %{{.*}}: i32
+  // CHECK: spv.GL.SMax %{{.*}}, %{{.*}}: i32
   %6 = arith.maxsi %lhs, %rhs : i32
-  // CHECK: spv.GLSL.UMax %{{.*}}, %{{.*}}: i32
+  // CHECK: spv.GL.UMax %{{.*}}, %{{.*}}: i32
   %7 = arith.maxui %lhs, %rhs : i32
-  // CHECK: spv.GLSL.SMin %{{.*}}, %{{.*}}: i32
+  // CHECK: spv.GL.SMin %{{.*}}, %{{.*}}: i32
   %8 = arith.minsi %lhs, %rhs : i32
-  // CHECK: spv.GLSL.UMin %{{.*}}, %{{.*}}: i32
+  // CHECK: spv.GL.UMin %{{.*}}, %{{.*}}: i32
   %9 = arith.minui %lhs, %rhs : i32
   return
 }
@@ -951,8 +1035,8 @@ func.func @int32_scalar(%lhs: i32, %rhs: i32) {
 // CHECK-LABEL: @scalar_srem
 // CHECK-SAME: (%[[LHS:.+]]: i32, %[[RHS:.+]]: i32)
 func.func @scalar_srem(%lhs: i32, %rhs: i32) {
-  // CHECK: %[[LABS:.+]] = spv.GLSL.SAbs %[[LHS]] : i32
-  // CHECK: %[[RABS:.+]] = spv.GLSL.SAbs %[[RHS]] : i32
+  // CHECK: %[[LABS:.+]] = spv.GL.SAbs %[[LHS]] : i32
+  // CHECK: %[[RABS:.+]] = spv.GL.SAbs %[[RHS]] : i32
   // CHECK:  %[[ABS:.+]] = spv.UMod %[[LABS]], %[[RABS]] : i32
   // CHECK:  %[[POS:.+]] = spv.IEqual %[[LHS]], %[[LABS]] : i32
   // CHECK:  %[[NEG:.+]] = spv.SNegate %[[ABS]] : i32
@@ -982,9 +1066,9 @@ func.func @float32_binary_scalar(%lhs: f32, %rhs: f32) {
   %3 = arith.divf %lhs, %rhs: f32
   // CHECK: spv.FRem %{{.*}}, %{{.*}}: f32
   %4 = arith.remf %lhs, %rhs: f32
-  // CHECK: spv.GLSL.FMax %{{.*}}, %{{.*}}: f32
+  // CHECK: spv.GL.FMax %{{.*}}, %{{.*}}: f32
   %5 = arith.maxf %lhs, %rhs: f32
-  // CHECK: spv.GLSL.FMin %{{.*}}, %{{.*}}: f32
+  // CHECK: spv.GL.FMin %{{.*}}, %{{.*}}: f32
   %6 = arith.minf %lhs, %rhs: f32
   return
 }
@@ -1002,8 +1086,8 @@ func.func @int_vector234(%arg0: vector<2xi8>, %arg1: vector<4xi64>) {
 // CHECK-LABEL: @vector_srem
 // CHECK-SAME: (%[[LHS:.+]]: vector<3xi16>, %[[RHS:.+]]: vector<3xi16>)
 func.func @vector_srem(%arg0: vector<3xi16>, %arg1: vector<3xi16>) {
-  // CHECK: %[[LABS:.+]] = spv.GLSL.SAbs %[[LHS]] : vector<3xi16>
-  // CHECK: %[[RABS:.+]] = spv.GLSL.SAbs %[[RHS]] : vector<3xi16>
+  // CHECK: %[[LABS:.+]] = spv.GL.SAbs %[[LHS]] : vector<3xi16>
+  // CHECK: %[[RABS:.+]] = spv.GL.SAbs %[[RHS]] : vector<3xi16>
   // CHECK:  %[[ABS:.+]] = spv.UMod %[[LABS]], %[[RABS]] : vector<3xi16>
   // CHECK:  %[[POS:.+]] = spv.IEqual %[[LHS]], %[[LABS]] : vector<3xi16>
   // CHECK:  %[[NEG:.+]] = spv.SNegate %[[ABS]] : vector<3xi16>
@@ -1049,7 +1133,7 @@ func.func @unsupported_2x2elem_vector(%arg0: vector<2x2xi32>) {
 
 // Check that types are converted to 32-bit when no special capabilities.
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @int_vector23
@@ -1077,13 +1161,11 @@ func.func @float_scalar(%arg0: f16, %arg1: f64) {
 // Check that types are converted to 32-bit when no special capabilities that
 // are not supported.
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, #spv.resource_limits<>>
 } {
 
-// expected-error@below {{failed to materialize conversion for block argument #0 that remained live after conversion}}
 func.func @int_vector4_invalid(%arg0: vector<4xi64>) {
-  // expected-error@below {{bitwidth emulation is not implemented yet on unsigned op}}
-  // expected-note@below {{see existing live user here}}
+  // expected-error@+1 {{bitwidth emulation is not implemented yet on unsigned op}}
   %0 = arith.divui %arg0, %arg0: vector<4xi64>
   return
 }
@@ -1097,7 +1179,7 @@ func.func @int_vector4_invalid(%arg0: vector<4xi64>) {
 //===----------------------------------------------------------------------===//
 
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @bitwise_scalar
@@ -1175,7 +1257,7 @@ func.func @shift_vector(%arg0 : vector<4xi32>, %arg1 : vector<4xi32>) {
 //===----------------------------------------------------------------------===//
 
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @cmpf
@@ -1207,13 +1289,22 @@ func.func @cmpf(%arg0 : f32, %arg1 : f32) {
   return
 }
 
+// CHECK-LABEL: @vec1cmpf
+func.func @vec1cmpf(%arg0 : vector<1xf32>, %arg1 : vector<1xf32>) {
+  // CHECK: spv.FOrdGreaterThan
+  %0 = arith.cmpf ogt, %arg0, %arg1 : vector<1xf32>
+  // CHECK: spv.FUnordLessThan
+  %1 = arith.cmpf ult, %arg0, %arg1 : vector<1xf32>
+  return
+}
+
 } // end module
 
 // -----
 
 // With Kernel capability, we can convert NaN check to spv.Ordered/spv.Unordered.
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [Kernel], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [Kernel], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @cmpf
@@ -1231,7 +1322,7 @@ func.func @cmpf(%arg0 : f32, %arg1 : f32) {
 
 // Without Kernel capability, we need to convert NaN check to spv.IsNan.
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @cmpf
@@ -1259,7 +1350,7 @@ func.func @cmpf(%arg0 : f32, %arg1 : f32) {
 //===----------------------------------------------------------------------===//
 
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @cmpi
@@ -1315,7 +1406,7 @@ func.func @vecboolcmpi(%arg0 : vector<4xi1>, %arg1 : vector<4xi1>) {
 
 module attributes {
   spv.target_env = #spv.target_env<
-    #spv.vce<v1.0, [Int8, Int16, Int64, Float16, Float64], []>, {}>
+    #spv.vce<v1.0, [Int8, Int16, Int64, Float16, Float64], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @constant
@@ -1330,17 +1421,17 @@ func.func @constant() {
   %3 = arith.constant dense<[2, 3]> : vector<2xi32>
   // CHECK: spv.Constant 1 : i32
   %4 = arith.constant 1 : index
-  // CHECK: spv.Constant dense<1> : tensor<6xi32> : !spv.array<6 x i32, stride=4>
+  // CHECK: spv.Constant dense<1> : tensor<6xi32> : !spv.array<6 x i32>
   %5 = arith.constant dense<1> : tensor<2x3xi32>
-  // CHECK: spv.Constant dense<1.000000e+00> : tensor<6xf32> : !spv.array<6 x f32, stride=4>
+  // CHECK: spv.Constant dense<1.000000e+00> : tensor<6xf32> : !spv.array<6 x f32>
   %6 = arith.constant dense<1.0> : tensor<2x3xf32>
-  // CHECK: spv.Constant dense<{{\[}}1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00, 5.000000e+00, 6.000000e+00]> : tensor<6xf32> : !spv.array<6 x f32, stride=4>
+  // CHECK: spv.Constant dense<{{\[}}1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00, 5.000000e+00, 6.000000e+00]> : tensor<6xf32> : !spv.array<6 x f32>
   %7 = arith.constant dense<[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]> : tensor<2x3xf32>
-  // CHECK: spv.Constant dense<{{\[}}1, 2, 3, 4, 5, 6]> : tensor<6xi32> : !spv.array<6 x i32, stride=4>
+  // CHECK: spv.Constant dense<{{\[}}1, 2, 3, 4, 5, 6]> : tensor<6xi32> : !spv.array<6 x i32>
   %8 = arith.constant dense<[[1, 2, 3], [4, 5, 6]]> : tensor<2x3xi32>
-  // CHECK: spv.Constant dense<{{\[}}1, 2, 3, 4, 5, 6]> : tensor<6xi32> : !spv.array<6 x i32, stride=4>
+  // CHECK: spv.Constant dense<{{\[}}1, 2, 3, 4, 5, 6]> : tensor<6xi32> : !spv.array<6 x i32>
   %9 = arith.constant dense<[[1, 2], [3, 4], [5, 6]]> : tensor<3x2xi32>
-  // CHECK: spv.Constant dense<{{\[}}1, 2, 3, 4, 5, 6]> : tensor<6xi32> : !spv.array<6 x i32, stride=4>
+  // CHECK: spv.Constant dense<{{\[}}1, 2, 3, 4, 5, 6]> : tensor<6xi32> : !spv.array<6 x i32>
   %10 = arith.constant dense<[1, 2, 3, 4, 5, 6]> : tensor<6xi32>
   return
 }
@@ -1353,7 +1444,7 @@ func.func @constant_16bit() {
   %1 = arith.constant 5.0 : f16
   // CHECK: spv.Constant dense<[2, 3]> : vector<2xi16>
   %2 = arith.constant dense<[2, 3]> : vector<2xi16>
-  // CHECK: spv.Constant dense<4.000000e+00> : tensor<5xf16> : !spv.array<5 x f16, stride=2>
+  // CHECK: spv.Constant dense<4.000000e+00> : tensor<5xf16> : !spv.array<5 x f16>
   %3 = arith.constant dense<4.0> : tensor<5xf16>
   return
 }
@@ -1366,7 +1457,7 @@ func.func @constant_64bit() {
   %1 = arith.constant 5.0 : f64
   // CHECK: spv.Constant dense<[2, 3]> : vector<2xi64>
   %2 = arith.constant dense<[2, 3]> : vector<2xi64>
-  // CHECK: spv.Constant dense<4.000000e+00> : tensor<5xf64> : !spv.array<5 x f64, stride=8>
+  // CHECK: spv.Constant dense<4.000000e+00> : tensor<5xf64> : !spv.array<5 x f64>
   %3 = arith.constant dense<4.0> : tensor<5xf64>
   return
 }
@@ -1377,7 +1468,7 @@ func.func @constant_64bit() {
 
 // Check that constants are converted to 32-bit when no special capability.
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @constant_16bit
@@ -1388,9 +1479,9 @@ func.func @constant_16bit() {
   %1 = arith.constant 5.0 : f16
   // CHECK: spv.Constant dense<[2, 3]> : vector<2xi32>
   %2 = arith.constant dense<[2, 3]> : vector<2xi16>
-  // CHECK: spv.Constant dense<4.000000e+00> : tensor<5xf32> : !spv.array<5 x f32, stride=4>
+  // CHECK: spv.Constant dense<4.000000e+00> : tensor<5xf32> : !spv.array<5 x f32>
   %3 = arith.constant dense<4.0> : tensor<5xf16>
-  // CHECK: spv.Constant dense<[1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00]> : tensor<4xf32> : !spv.array<4 x f32, stride=4>
+  // CHECK: spv.Constant dense<[1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00]> : tensor<4xf32> : !spv.array<4 x f32>
   %4 = arith.constant dense<[[1.0, 2.0], [3.0, 4.0]]> : tensor<2x2xf16>
   return
 }
@@ -1403,9 +1494,9 @@ func.func @constant_64bit() {
   %1 = arith.constant 5.0 : f64
   // CHECK: spv.Constant dense<[2, 3]> : vector<2xi32>
   %2 = arith.constant dense<[2, 3]> : vector<2xi64>
-  // CHECK: spv.Constant dense<4.000000e+00> : tensor<5xf32> : !spv.array<5 x f32, stride=4>
+  // CHECK: spv.Constant dense<4.000000e+00> : tensor<5xf32> : !spv.array<5 x f32>
   %3 = arith.constant dense<4.0> : tensor<5xf64>
-  // CHECK: spv.Constant dense<[1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00]> : tensor<4xf32> : !spv.array<4 x f32, stride=4>
+  // CHECK: spv.Constant dense<[1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00]> : tensor<4xf32> : !spv.array<4 x f32>
   %4 = arith.constant dense<[[1.0, 2.0], [3.0, 4.0]]> : tensor<2x2xf16>
   return
 }
@@ -1460,7 +1551,7 @@ func.func @unsupported_cases() {
 
 module attributes {
   spv.target_env = #spv.target_env<
-    #spv.vce<v1.0, [Int8, Int16, Int64, Float16, Float64], []>, {}>
+    #spv.vce<v1.0, [Int8, Int16, Int64, Float16, Float64], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: index_cast1
@@ -1699,12 +1790,13 @@ func.func @fptosi2(%arg0 : f16) -> i16 {
 // Checks that cast types will be adjusted when missing special capabilities for
 // certain non-32-bit scalar types.
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [Float64], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [Float64], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @fpext1
-// CHECK-SAME: %[[ARG:.*]]: f32
+// CHECK-SAME: %[[A:.*]]: f16
 func.func @fpext1(%arg0: f16) -> f64 {
+  // CHECK: %[[ARG:.+]] = builtin.unrealized_conversion_cast %[[A]] : f16 to f32
   // CHECK-NEXT: spv.FConvert %[[ARG]] : f32 to f64
   %0 = arith.extf %arg0 : f16 to f64
   return %0: f64
@@ -1725,12 +1817,13 @@ func.func @fpext2(%arg0 : f32) -> f64 {
 // Checks that cast types will be adjusted when missing special capabilities for
 // certain non-32-bit scalar types.
 module attributes {
-  spv.target_env = #spv.target_env<#spv.vce<v1.0, [Float16], []>, {}>
+  spv.target_env = #spv.target_env<#spv.vce<v1.0, [Float16], []>, #spv.resource_limits<>>
 } {
 
 // CHECK-LABEL: @fptrunc1
-// CHECK-SAME: %[[ARG:.*]]: f32
+// CHECK-SAME: %[[A:.*]]: f64
 func.func @fptrunc1(%arg0 : f64) -> f16 {
+  // CHECK: %[[ARG:.+]] = builtin.unrealized_conversion_cast %[[A]] : f64 to f32
   // CHECK-NEXT: spv.FConvert %[[ARG]] : f32 to f16
   %0 = arith.truncf %arg0 : f64 to f16
   return %0: f16

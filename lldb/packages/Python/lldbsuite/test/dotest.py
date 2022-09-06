@@ -36,7 +36,6 @@ import sys
 import tempfile
 
 # Third-party modules
-import six
 import unittest2
 
 # LLDB Modules
@@ -280,6 +279,11 @@ def parseOptionsAndInitTestdirs():
     if not configuration.get_filecheck_path():
         logging.warning('No valid FileCheck executable; some tests may fail...')
         logging.warning('(Double-check the --llvm-tools-dir argument to dotest.py)')
+
+    configuration.hermetic_libcxx = args.hermetic_libcxx
+    if configuration.hermetic_libcxx and args.lldb_platform_name:
+        configuration.hermetic_libcxx = False
+        logging.warning('Hermetic libc++ is not supported for remote runs: ignoring --hermetic-libcxx')
 
     if args.channels:
         lldbtest_config.channels = args.channels

@@ -907,6 +907,38 @@ getRegClassesForCopy(MachineInstr &I, const TargetInstrInfo &TII,
           getMinClassForRegBank(DstRegBank, DstSize, true)};
 }
 
+// FIXME: We need some sort of API in RBI/TRI to allow generic code to
+// constrain operands of simple instructions given a TargetRegisterClass
+// and LLT
+static bool selectDebugInstr(MachineInstr &I, MachineRegisterInfo &MRI,
+                             const RegisterBankInfo &RBI) {
+  for (MachineOperand &MO : I.operands()) {
+    if (!MO.isReg())
+      continue;
+    Register Reg = MO.getReg();
+    if (!Reg)
+      continue;
+    if (Reg.isPhysical())
+      continue;
+    LLT Ty = MRI.getType(Reg);
+    const RegClassOrRegBank &RegClassOrBank = MRI.getRegClassOrRegBank(Reg);
+    const TargetRegisterClass *RC =
+        RegClassOrBank.dyn_cast<const TargetRegisterClass *>();
+    if (!RC) {
+      const RegisterBank &RB = *RegClassOrBank.get<const RegisterBank *>();
+      RC = getRegClassForTypeOnBank(Ty, RB);
+      if (!RC) {
+        LLVM_DEBUG(
+            dbgs() << "Warning: DBG_VALUE operand has unexpected size/bank\n");
+        break;
+      }
+    }
+    RBI.constrainGenericRegister(Reg, *RC, MRI);
+  }
+
+  return true;
+}
+
 static bool selectCopy(MachineInstr &I, const TargetInstrInfo &TII,
                        MachineRegisterInfo &MRI, const TargetRegisterInfo &TRI,
                        const RegisterBankInfo &RBI) {
@@ -1710,11 +1742,6 @@ bool AArch64InstructionSelector::selectCompareBranch(
     MachineInstr &I, MachineFunction &MF, MachineRegisterInfo &MRI) {
   Register CondReg = I.getOperand(0).getReg();
   MachineInstr *CCMI = MRI.getVRegDef(CondReg);
-  if (CCMI->getOpcode() == TargetOpcode::G_TRUNC) {
-    CondReg = CCMI->getOperand(1).getReg();
-    CCMI = MRI.getVRegDef(CondReg);
-  }
-
   // Try to select the G_BRCOND using whatever is feeding the condition if
   // possible.
   unsigned CCMIOpc = CCMI->getOpcode();
@@ -2312,6 +2339,16 @@ bool AArch64InstructionSelector::earlySelect(MachineInstr &I) {
     I.eraseFromParent();
     return true;
   }
+  case TargetOpcode::G_FENCE: {
+    if (I.getOperand(1).getImm() == 0)
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(AArch64::CompilerBarrier))
+          .addImm(I.getOperand(0).getImm());
+    else
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(AArch64::DMB))
+          .addImm(I.getOperand(0).getImm() == 4 ? 0x9 : 0xb);
+    I.eraseFromParent();
+    return true;
+  }
   default:
     return false;
   }
@@ -2325,8 +2362,7 @@ bool AArch64InstructionSelector::select(MachineInstr &I) {
   MachineFunction &MF = *MBB.getParent();
   MachineRegisterInfo &MRI = MF.getRegInfo();
 
-  const AArch64Subtarget *Subtarget =
-      &static_cast<const AArch64Subtarget &>(MF.getSubtarget());
+  const AArch64Subtarget *Subtarget = &MF.getSubtarget<AArch64Subtarget>();
   if (Subtarget->requiresStrictAlign()) {
     // We don't support this feature yet.
     LLVM_DEBUG(dbgs() << "AArch64 GISel does not support strict-align yet\n");
@@ -2372,6 +2408,9 @@ bool AArch64InstructionSelector::select(MachineInstr &I) {
 
     if (I.isCopy())
       return selectCopy(I, TII, MRI, TRI, RBI);
+
+    if (I.isDebugInstr())
+      return selectDebugInstr(I, MRI, RBI);
 
     return true;
   }
@@ -2565,7 +2604,7 @@ bool AArch64InstructionSelector::select(MachineInstr &I) {
         // For s32, use a cp load if we have optsize/minsize.
         if (!shouldOptForSize(&MF))
           break;
-        LLVM_FALLTHROUGH;
+        [[fallthrough]];
       case 16:
       case 64:
       case 128: {
@@ -2781,12 +2820,18 @@ bool AArch64InstructionSelector::select(MachineInstr &I) {
         return false;
 
       if (isa<GLoad>(LdSt)) {
-        static unsigned Opcodes[] = {AArch64::LDARB, AArch64::LDARH,
-                                     AArch64::LDARW, AArch64::LDARX};
+        static constexpr unsigned LDAPROpcodes[] = {
+            AArch64::LDAPRB, AArch64::LDAPRH, AArch64::LDAPRW, AArch64::LDAPRX};
+        static constexpr unsigned LDAROpcodes[] = {
+            AArch64::LDARB, AArch64::LDARH, AArch64::LDARW, AArch64::LDARX};
+        ArrayRef<unsigned> Opcodes =
+            STI.hasLDAPR() && Order != AtomicOrdering::SequentiallyConsistent
+                ? LDAPROpcodes
+                : LDAROpcodes;
         I.setDesc(TII.get(Opcodes[Log2_32(MemSizeInBytes)]));
       } else {
-        static unsigned Opcodes[] = {AArch64::STLRB, AArch64::STLRH,
-                                     AArch64::STLRW, AArch64::STLRX};
+        static constexpr unsigned Opcodes[] = {AArch64::STLRB, AArch64::STLRH,
+                                               AArch64::STLRW, AArch64::STLRX};
         Register ValReg = LdSt.getReg(0);
         if (MRI.getType(ValReg).getSizeInBits() == 64 && MemSizeInBits != 64) {
           // Emit a subreg copy of 32 bits.
@@ -2962,7 +3007,7 @@ bool AArch64InstructionSelector::select(MachineInstr &I) {
   case TargetOpcode::G_ASHR:
     if (MRI.getType(I.getOperand(0).getReg()).isVector())
       return selectVectorAshrLshr(I, MRI);
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
   case TargetOpcode::G_SHL:
     if (Opcode == TargetOpcode::G_SHL &&
         MRI.getType(I.getOperand(0).getReg()).isVector())
@@ -2987,7 +3032,7 @@ bool AArch64InstructionSelector::select(MachineInstr &I) {
         I.getOperand(2).setReg(Trunc.getReg(0));
       }
     }
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
   case TargetOpcode::G_OR: {
     // Reject the various things we don't support yet.
     if (unsupportedBinOp(I, RBI, MRI, TRI))
@@ -3331,12 +3376,6 @@ bool AArch64InstructionSelector::select(MachineInstr &I) {
 
   case TargetOpcode::G_SELECT: {
     auto &Sel = cast<GSelect>(I);
-    if (MRI.getType(Sel.getCondReg()) != LLT::scalar(1)) {
-      LLVM_DEBUG(dbgs() << "G_SELECT cond has type: " << Ty
-                        << ", expected: " << LLT::scalar(1) << '\n');
-      return false;
-    }
-
     const Register CondReg = Sel.getCondReg();
     const Register TReg = Sel.getTrueReg();
     const Register FReg = Sel.getFalseReg();
@@ -4762,12 +4801,6 @@ static bool canEmitConjunction(Register Val, bool &CanNegate, bool &MustBeFirst,
     return false;
   MachineInstr *ValDef = MRI.getVRegDef(Val);
   unsigned Opcode = ValDef->getOpcode();
-  if (Opcode == TargetOpcode::G_TRUNC) {
-    // Look through a trunc.
-    Val = ValDef->getOperand(1).getReg();
-    ValDef = MRI.getVRegDef(Val);
-    Opcode = ValDef->getOpcode();
-  }
   if (isa<GAnyCmp>(ValDef)) {
     CanNegate = true;
     MustBeFirst = false;
@@ -4855,12 +4888,6 @@ MachineInstr *AArch64InstructionSelector::emitConjunctionRec(
   auto &MRI = *MIB.getMRI();
   MachineInstr *ValDef = MRI.getVRegDef(Val);
   unsigned Opcode = ValDef->getOpcode();
-  if (Opcode == TargetOpcode::G_TRUNC) {
-    // Look through a trunc.
-    Val = ValDef->getOperand(1).getReg();
-    ValDef = MRI.getVRegDef(Val);
-    Opcode = ValDef->getOpcode();
-  }
   if (auto *Cmp = dyn_cast<GAnyCmp>(ValDef)) {
     Register LHS = Cmp->getLHSReg();
     Register RHS = Cmp->getRHSReg();
@@ -5011,31 +5038,17 @@ bool AArch64InstructionSelector::tryOptSelect(GSelect &I) {
 
   // First, check if the condition is defined by a compare.
   MachineInstr *CondDef = MRI.getVRegDef(I.getOperand(1).getReg());
-  while (CondDef) {
-    // We can only fold if all of the defs have one use.
-    Register CondDefReg = CondDef->getOperand(0).getReg();
-    if (!MRI.hasOneNonDBGUse(CondDefReg)) {
-      // Unless it's another select.
-      for (const MachineInstr &UI : MRI.use_nodbg_instructions(CondDefReg)) {
-        if (CondDef == &UI)
-          continue;
-        if (UI.getOpcode() != TargetOpcode::G_SELECT)
-          return false;
-      }
+
+  // We can only fold if all of the defs have one use.
+  Register CondDefReg = CondDef->getOperand(0).getReg();
+  if (!MRI.hasOneNonDBGUse(CondDefReg)) {
+    // Unless it's another select.
+    for (const MachineInstr &UI : MRI.use_nodbg_instructions(CondDefReg)) {
+      if (CondDef == &UI)
+        continue;
+      if (UI.getOpcode() != TargetOpcode::G_SELECT)
+        return false;
     }
-
-    // We can skip over G_TRUNC since the condition is 1-bit.
-    // Truncating/extending can have no impact on the value.
-    unsigned Opc = CondDef->getOpcode();
-    if (Opc != TargetOpcode::COPY && Opc != TargetOpcode::G_TRUNC)
-      break;
-
-    // Can't see past copies from physregs.
-    if (Opc == TargetOpcode::COPY &&
-        Register::isPhysicalRegister(CondDef->getOperand(1).getReg()))
-      return false;
-
-    CondDef = MRI.getVRegDef(CondDef->getOperand(1).getReg());
   }
 
   // Is the condition defined by a compare?
@@ -5816,7 +5829,7 @@ bool AArch64InstructionSelector::selectIntrinsic(MachineInstr &I,
     uint64_t Key = I.getOperand(3).getImm();
     Register DiscReg = I.getOperand(4).getReg();
     auto DiscVal = getIConstantVRegVal(DiscReg, MRI);
-    bool IsDiscZero = DiscVal.hasValue() && DiscVal->isNullValue();
+    bool IsDiscZero = DiscVal && DiscVal->isNullValue();
 
     if (Key > 3)
       return false;
@@ -6510,7 +6523,7 @@ AArch64InstructionSelector::selectAddrModeIndexed(MachineOperand &Root,
 
   // Before falling back to our general case, check if the unscaled
   // instructions can handle this. If so, that's preferable.
-  if (selectAddrModeUnscaled(Root, Size).hasValue())
+  if (selectAddrModeUnscaled(Root, Size))
     return None;
 
   return {{
@@ -6728,7 +6741,7 @@ void AArch64InstructionSelector::renderTruncImm(MachineInstrBuilder &MIB,
   Optional<int64_t> CstVal =
       getIConstantVRegSExtVal(MI.getOperand(0).getReg(), MRI);
   assert(CstVal && "Expected constant value");
-  MIB.addImm(CstVal.getValue());
+  MIB.addImm(*CstVal);
 }
 
 void AArch64InstructionSelector::renderLogicalImm32(

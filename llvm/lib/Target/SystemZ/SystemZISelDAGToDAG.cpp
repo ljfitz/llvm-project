@@ -860,7 +860,7 @@ bool SystemZDAGToDAGISel::expandRxSBG(RxSBGOperands &RxSBG) const {
       RxSBG.Input = N.getOperand(0);
       return true;
     }
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
 
   case ISD::SIGN_EXTEND: {
     // Check that the extension bits are don't-care (i.e. are masked out
@@ -968,7 +968,7 @@ bool SystemZDAGToDAGISel::tryRISBGZero(SDNode *N) {
     if (RISBG.Input.getOpcode() != ISD::ANY_EXTEND &&
         RISBG.Input.getOpcode() != ISD::TRUNCATE)
       Count += 1;
-  if (Count == 0)
+  if (Count == 0 || isa<ConstantSDNode>(RISBG.Input))
     return false;
 
   // Prefer to use normal shift instructions over RISBG, since they can handle
@@ -1349,7 +1349,7 @@ bool SystemZDAGToDAGISel::tryFoldLoadStoreIntoMemOperand(SDNode *Node) {
     return false;
   case SystemZISD::SSUBO:
     NegateOperand = true;
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
   case SystemZISD::SADDO:
     if (MemVT == MVT::i32)
       NewOpc = SystemZ::ASI;
@@ -1360,7 +1360,7 @@ bool SystemZDAGToDAGISel::tryFoldLoadStoreIntoMemOperand(SDNode *Node) {
     break;
   case SystemZISD::USUBO:
     NegateOperand = true;
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
   case SystemZISD::UADDO:
     if (MemVT == MVT::i32)
       NewOpc = SystemZ::ALSI;
@@ -1472,7 +1472,7 @@ bool SystemZDAGToDAGISel::storeLoadIsAligned(SDNode *N) const {
   assert(MMO && "Expected a memory operand.");
 
   // The memory access must have a proper alignment and no index register.
-  if (MemAccess->getAlignment() < StoreSize ||
+  if (MemAccess->getAlign().value() < StoreSize ||
       !MemAccess->getOffset().isUndef())
     return false;
 
@@ -1562,7 +1562,7 @@ void SystemZDAGToDAGISel::Select(SDNode *Node) {
     if (Node->getOperand(1).getOpcode() != ISD::Constant)
       if (tryRxSBG(Node, SystemZ::RNSBG))
         return;
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
   case ISD::ROTL:
   case ISD::SHL:
   case ISD::SRL:

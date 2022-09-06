@@ -11,8 +11,12 @@
 
 #include "Utils/AMDGPUBaseInfo.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/CodeGen/MachineFunction.h"
-#include "AMDGPU.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalValue.h"
+#include "llvm/IR/GlobalVariable.h"
 
 namespace llvm {
 
@@ -66,7 +70,7 @@ public:
     return ExplicitKernArgSize;
   }
 
-  unsigned getMaxKernArgAlign() const { return MaxKernArgAlign.value(); }
+  Align getMaxKernArgAlign() const { return MaxKernArgAlign; }
 
   uint32_t getLDSSize() const {
     return LDSSize;
@@ -99,7 +103,9 @@ public:
   }
 
   unsigned allocateLDSGlobal(const DataLayout &DL, const GlobalVariable &GV);
-  void allocateModuleLDSGlobal(const Module *M);
+  void allocateModuleLDSGlobal(const Function &F);
+
+  static Optional<uint32_t> getLDSKernelIdMetadata(const Function &F);
 
   Align getDynLDSAlign() const { return DynLDSAlign; }
 

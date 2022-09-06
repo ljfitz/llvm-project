@@ -13,8 +13,11 @@
 #include "clang/Tooling/DependencyScanning/DependencyScanningWorker.h"
 #include "clang/Tooling/DependencyScanning/ModuleDepCollector.h"
 #include "clang/Tooling/JSONCompilationDatabase.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/StringSet.h"
+#include "llvm/ADT/StringMap.h"
 #include <string>
+#include <vector>
 
 namespace clang {
 namespace tooling {
@@ -47,15 +50,12 @@ struct FullDependencies {
 
   /// Get the full command line.
   ///
-  /// \param LookupPCMPath This function is called to fill in "-fmodule-file="
-  ///                      arguments and the "-o" argument. It needs to return
-  ///                      a path for where the PCM for the given module is to
-  ///                      be located.
-  std::vector<std::string>
-  getCommandLine(std::function<StringRef(ModuleID)> LookupPCMPath) const;
-
-  /// Get the full command line, excluding -fmodule-file=" arguments.
-  std::vector<std::string> getCommandLineWithoutModulePaths() const;
+  /// \param LookupModuleOutput This function is called to fill in
+  ///                           "-fmodule-file=", "-o" and other output
+  ///                           arguments for dependencies.
+  std::vector<std::string> getCommandLine(
+      llvm::function_ref<std::string(const ModuleID &, ModuleOutputKind)>
+          LookupModuleOutput) const;
 };
 
 struct FullDependenciesResult {
@@ -68,7 +68,9 @@ struct FullDependenciesResult {
 class DependencyScanningTool {
 public:
   /// Construct a dependency scanning tool.
-  DependencyScanningTool(DependencyScanningService &Service);
+  DependencyScanningTool(DependencyScanningService &Service,
+                         llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> FS =
+                             llvm::vfs::createPhysicalFileSystem());
 
   /// Print out the dependency information into a string using the dependency
   /// file format that is specified in the options (-MD is the default) and
@@ -100,6 +102,42 @@ public:
 
 private:
   DependencyScanningWorker Worker;
+};
+
+class FullDependencyConsumer : public DependencyConsumer {
+public:
+  FullDependencyConsumer(const llvm::StringSet<> &AlreadySeen)
+      : AlreadySeen(AlreadySeen) {}
+
+  void handleDependencyOutputOpts(const DependencyOutputOptions &) override {}
+
+  void handleFileDependency(StringRef File) override {
+    Dependencies.push_back(std::string(File));
+  }
+
+  void handlePrebuiltModuleDependency(PrebuiltModuleDep PMD) override {
+    PrebuiltModuleDeps.emplace_back(std::move(PMD));
+  }
+
+  void handleModuleDependency(ModuleDeps MD) override {
+    ClangModuleDeps[MD.ID.ContextHash + MD.ID.ModuleName] = std::move(MD);
+  }
+
+  void handleContextHash(std::string Hash) override {
+    ContextHash = std::move(Hash);
+  }
+
+  FullDependenciesResult getFullDependencies(
+      const std::vector<std::string> &OriginalCommandLine) const;
+
+private:
+  std::vector<std::string> Dependencies;
+  std::vector<PrebuiltModuleDep> PrebuiltModuleDeps;
+  llvm::MapVector<std::string, ModuleDeps, llvm::StringMap<unsigned>>
+      ClangModuleDeps;
+  std::string ContextHash;
+  std::vector<std::string> OutputPaths;
+  const llvm::StringSet<> &AlreadySeen;
 };
 
 } // end namespace dependencies

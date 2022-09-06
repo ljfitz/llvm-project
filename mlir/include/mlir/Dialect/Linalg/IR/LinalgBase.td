@@ -40,6 +40,7 @@ def Linalg_Dialect : Dialect {
     "memref::MemRefDialect",
     "tensor::TensorDialect",
   ];
+  let useDefaultAttributePrinterParser = 1;
   let hasCanonicalizer = 1;
   let hasOperationAttrVerify = 1;
   let hasConstantMaterializer = 1;
@@ -60,6 +61,8 @@ def Linalg_Dialect : Dialect {
     private:
       llvm::StringMap<RegionBuilderFunType> namedStructuredOpRegionBuilders;
   }];
+
+  let emitAccessorPrefix = kEmitAccessorPrefix_Both;
 }
 
 // Define the function attribute enums matching the OpDSL functions.

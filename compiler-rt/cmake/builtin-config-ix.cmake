@@ -30,6 +30,14 @@ _Float16 foo(_Float16 x) {
 "
 )
 
+builtin_check_c_compiler_source(COMPILER_RT_HAS_BFLOAT16
+"
+__bf16 foo(__bf16 x) {
+ return x;
+}
+"
+)
+
 builtin_check_c_compiler_source(COMPILER_RT_HAS_ASM_LSE
 "
 asm(\".arch armv8-a+lse\");
@@ -38,6 +46,7 @@ asm(\"cas w0, w1, [x2]\");
 
 set(ARM64 aarch64)
 set(ARM32 arm armhf armv6m armv7m armv7em armv7 armv7s armv7k armv8m.main armv8.1m.main)
+set(AVR avr)
 set(HEXAGON hexagon)
 set(X86 i386)
 set(X86_64 x86_64)
@@ -60,7 +69,7 @@ if(APPLE)
 endif()
 
 set(ALL_BUILTIN_SUPPORTED_ARCH
-  ${X86} ${X86_64} ${ARM32} ${ARM64}
+  ${X86} ${X86_64} ${ARM32} ${ARM64} ${AVR}
   ${HEXAGON} ${MIPS32} ${MIPS64} ${PPC32} ${PPC64}
   ${RISCV32} ${RISCV64} ${SPARC} ${SPARCV9}
   ${WASM32} ${WASM64} ${VE})
@@ -96,7 +105,7 @@ if(APPLE)
   endfunction()
 
   set(DARWIN_EMBEDDED_PLATFORMS)
-  set(DARWIN_osx_BUILTIN_MIN_VER 10.5)
+  set(DARWIN_osx_BUILTIN_MIN_VER 10.7)
   set(DARWIN_osx_BUILTIN_MIN_VER_FLAG
       -mmacosx-version-min=${DARWIN_osx_BUILTIN_MIN_VER})
   set(DARWIN_osx_BUILTIN_ALL_POSSIBLE_ARCHS ${X86} ${X86_64})

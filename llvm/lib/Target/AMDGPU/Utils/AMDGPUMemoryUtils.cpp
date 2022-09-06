@@ -148,6 +148,8 @@ bool isReallyAClobber(const Value *Ptr, MemoryDef *Def, AAResults *AA) {
     switch (II->getIntrinsicID()) {
     case Intrinsic::amdgcn_s_barrier:
     case Intrinsic::amdgcn_wave_barrier:
+    case Intrinsic::amdgcn_sched_barrier:
+    case Intrinsic::amdgcn_sched_group_barrier:
       return false;
     default:
       break;
@@ -206,7 +208,7 @@ bool isClobberedInFunction(const LoadInst *Load, MemorySSA *MSSA,
     }
 
     const MemoryPhi *Phi = cast<MemoryPhi>(MA);
-    for (auto &Use : Phi->incoming_values())
+    for (const auto &Use : Phi->incoming_values())
       WorkList.push_back(cast<MemoryAccess>(&Use));
   }
 

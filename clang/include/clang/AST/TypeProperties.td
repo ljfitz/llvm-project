@@ -671,7 +671,7 @@ let Class = TemplateSpecializationType in {
 
   def : Creator<[{
     QualType result;
-    if (!underlyingType.hasValue()) {
+    if (!underlyingType) {
       result = ctx.getCanonicalTemplateSpecializationType(templateName,
                                                           templateArguments);
     } else {
@@ -734,12 +734,15 @@ let Class = SubstTemplateTypeParmType in {
   def : Property<"replacementType", QualType> {
     let Read = [{ node->getReplacementType() }];
   }
+  def : Property<"PackIndex", Optional<UInt32>> {
+    let Read = [{ node->getPackIndex() }];
+  }
 
   def : Creator<[{
     // The call to getCanonicalType here existed in ASTReader.cpp, too.
     return ctx.getSubstTemplateTypeParmType(
         cast<TemplateTypeParmType>(replacedParameter),
-        ctx.getCanonicalType(replacementType));
+        ctx.getCanonicalType(replacementType), PackIndex);
   }]>;
 }
 

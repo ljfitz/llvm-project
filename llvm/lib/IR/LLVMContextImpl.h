@@ -17,6 +17,7 @@
 #include "ConstantsContext.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
+#include "llvm/ADT/Any.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseMapInfo.h"
@@ -69,6 +70,7 @@ class RemarkStreamer;
 }
 template <typename T> class StringMapEntry;
 class StringRef;
+class TypedPointerType;
 class ValueHandleBase;
 
 using DenseMapAPIntKeyInfo = DenseMapInfo<APInt>;
@@ -686,7 +688,7 @@ template <> struct MDNodeKeyImpl<DIFile> {
   unsigned getHashValue() const {
     return hash_combine(Filename, Directory, Checksum ? Checksum->Kind : 0,
                         Checksum ? Checksum->Value : nullptr,
-                        Source.getValueOr(nullptr));
+                        Source.value_or(nullptr));
   }
 };
 
@@ -1483,6 +1485,7 @@ public:
   DenseMap<std::pair<Type *, ElementCount>, VectorType *> VectorTypes;
   DenseMap<Type *, PointerType *> PointerTypes; // Pointers in AddrSpace = 0
   DenseMap<std::pair<Type *, unsigned>, PointerType *> ASPointerTypes;
+  DenseMap<std::pair<Type *, unsigned>, TypedPointerType *> ASTypedPointerTypes;
 
   /// ValueHandles - This map keeps track of all of the value handles that are
   /// watching a Value*.  The Value::HasValueHandle bit is used to know
@@ -1501,6 +1504,9 @@ public:
 
   /// Collection of per-GlobalValue partitions used in this context.
   DenseMap<const GlobalValue *, StringRef> GlobalValuePartitions;
+
+  DenseMap<const GlobalValue *, GlobalValue::SanitizerMetadata>
+      GlobalValueSanitizerMetadata;
 
   /// DiscriminatorTable - This table maps file:line locations to an
   /// integer representing the next DWARF path discriminator to assign to

@@ -131,15 +131,14 @@ static void wrapForExternalCallers(OpBuilder &rewriter, Location loc,
   SmallVector<NamedAttribute, 4> attributes;
   filterFuncAttributes(funcOp->getAttrs(), /*filterArgAndResAttrs=*/false,
                        attributes);
-  Type wrapperFuncType;
-  bool resultIsNowArg;
-  std::tie(wrapperFuncType, resultIsNowArg) =
+  auto [wrapperFuncType, resultIsNowArg] =
       typeConverter.convertFunctionTypeCWrapper(type);
   if (resultIsNowArg)
     prependResAttrsToArgAttrs(rewriter, attributes, funcOp.getNumArguments());
   auto wrapperFuncOp = rewriter.create<LLVM::LLVMFuncOp>(
       loc, llvm::formatv("_mlir_ciface_{0}", funcOp.getName()).str(),
-      wrapperFuncType, LLVM::Linkage::External, /*dsoLocal*/ false, attributes);
+      wrapperFuncType, LLVM::Linkage::External, /*dsoLocal*/ false,
+      /*cconv*/ LLVM::CConv::C, attributes);
 
   OpBuilder::InsertionGuard guard(rewriter);
   rewriter.setInsertionPointToStart(wrapperFuncOp.addEntryBlock());
@@ -165,7 +164,7 @@ static void wrapForExternalCallers(OpBuilder &rewriter, Location loc,
   auto call = rewriter.create<LLVM::CallOp>(loc, newFuncOp, args);
 
   if (resultIsNowArg) {
-    rewriter.create<LLVM::StoreOp>(loc, call.getResult(0),
+    rewriter.create<LLVM::StoreOp>(loc, call.getResult(),
                                    wrapperFuncOp.getArgument(0));
     rewriter.create<LLVM::ReturnOp>(loc, ValueRange{});
   } else {
@@ -188,9 +187,7 @@ static void wrapExternalFunction(OpBuilder &builder, Location loc,
                                  LLVM::LLVMFuncOp newFuncOp) {
   OpBuilder::InsertionGuard guard(builder);
 
-  Type wrapperType;
-  bool resultIsNowArg;
-  std::tie(wrapperType, resultIsNowArg) =
+  auto [wrapperType, resultIsNowArg] =
       typeConverter.convertFunctionTypeCWrapper(funcOp.getFunctionType());
   // This conversion can only fail if it could not convert one of the argument
   // types. But since it has been applied to a non-wrapper function before, it
@@ -206,7 +203,8 @@ static void wrapExternalFunction(OpBuilder &builder, Location loc,
   // Create the auxiliary function.
   auto wrapperFunc = builder.create<LLVM::LLVMFuncOp>(
       loc, llvm::formatv("_mlir_ciface_{0}", funcOp.getName()).str(),
-      wrapperType, LLVM::Linkage::External, /*dsoLocal*/ false, attributes);
+      wrapperType, LLVM::Linkage::External, /*dsoLocal*/ false,
+      /*cconv*/ LLVM::CConv::C, attributes);
 
   builder.setInsertionPointToStart(newFuncOp.addEntryBlock());
 
@@ -267,7 +265,7 @@ static void wrapExternalFunction(OpBuilder &builder, Location loc,
 
   if (resultIsNowArg) {
     Value result = builder.create<LLVM::LoadOp>(loc, args.front());
-    builder.create<LLVM::ReturnOp>(loc, ValueRange{result});
+    builder.create<LLVM::ReturnOp>(loc, result);
   } else {
     builder.create<LLVM::ReturnOp>(loc, call.getResults());
   }
@@ -314,8 +312,7 @@ protected:
           llvmType.cast<LLVM::LLVMFunctionType>().getNumParams());
       for (unsigned i = 0, e = funcOp.getNumArguments(); i < e; ++i) {
         auto mapping = result.getInputMapping(i);
-        assert(mapping.hasValue() &&
-               "unexpected deletion of function argument");
+        assert(mapping && "unexpected deletion of function argument");
         for (size_t j = 0; j < mapping->size; ++j)
           newArgAttrs[mapping->inputNo + j] = argAttrDicts[i];
       }
@@ -345,7 +342,7 @@ protected:
     }
     auto newFuncOp = rewriter.create<LLVM::LLVMFuncOp>(
         funcOp.getLoc(), funcOp.getName(), llvmType, linkage,
-        /*dsoLocal*/ false, attributes);
+        /*dsoLocal*/ false, /*cconv*/ LLVM::CConv::C, attributes);
     rewriter.inlineRegionBefore(funcOp.getBody(), newFuncOp.getBody(),
                                 newFuncOp.end());
     if (failed(rewriter.convertRegionTypes(&newFuncOp.getBody(), *typeConverter,
@@ -359,7 +356,6 @@ protected:
 /// FuncOp legalization pattern that converts MemRef arguments to pointers to
 /// MemRef descriptors (LLVM struct data types) containing all the MemRef type
 /// information.
-static constexpr StringRef kEmitIfaceAttrName = "llvm.emit_c_interface";
 struct FuncOpConversion : public FuncOpConversionBase {
   FuncOpConversion(LLVMTypeConverter &converter)
       : FuncOpConversionBase(converter) {}
@@ -371,8 +367,12 @@ struct FuncOpConversion : public FuncOpConversionBase {
     if (!newFuncOp)
       return failure();
 
-    if (getTypeConverter()->getOptions().emitCWrappers ||
-        funcOp->getAttrOfType<UnitAttr>(kEmitIfaceAttrName)) {
+    if (funcOp->getAttrOfType<UnitAttr>(
+            LLVM::LLVMDialect::getEmitCWrapperAttrName())) {
+      if (newFuncOp.isVarArg())
+        return funcOp->emitError("C interface for variadic functions is not "
+                                 "supported yet.");
+
       if (newFuncOp.isExternal())
         wrapExternalFunction(rewriter, funcOp.getLoc(), *getTypeConverter(),
                              funcOp, newFuncOp);
@@ -517,11 +517,8 @@ struct CallOpInterfaceLowering : public ConvertOpToLLVMPattern<CallOpType> {
       // Extract individual results from the structure and return them as list.
       results.reserve(numResults);
       for (unsigned i = 0; i < numResults; ++i) {
-        auto type =
-            this->typeConverter->convertType(callOp.getResult(i).getType());
         results.push_back(rewriter.create<LLVM::ExtractValueOp>(
-            callOp.getLoc(), type, newOp->getResult(0),
-            rewriter.getI64ArrayAttr(i)));
+            callOp.getLoc(), newOp->getResult(0), i));
       }
     }
 
@@ -620,12 +617,7 @@ struct ReturnOpLowering : public ConvertOpToLLVMPattern<func::ReturnOp> {
     }
 
     // If ReturnOp has 0 or 1 operand, create it and return immediately.
-    if (numArguments == 0) {
-      rewriter.replaceOpWithNewOp<LLVM::ReturnOp>(op, TypeRange(), ValueRange(),
-                                                  op->getAttrs());
-      return success();
-    }
-    if (numArguments == 1) {
+    if (numArguments <= 1) {
       rewriter.replaceOpWithNewOp<LLVM::ReturnOp>(
           op, TypeRange(), updatedOperands, op->getAttrs());
       return success();
@@ -633,14 +625,13 @@ struct ReturnOpLowering : public ConvertOpToLLVMPattern<func::ReturnOp> {
 
     // Otherwise, we need to pack the arguments into an LLVM struct type before
     // returning.
-    auto packedType = getTypeConverter()->packFunctionResults(
-        llvm::to_vector<4>(op.getOperandTypes()));
+    auto packedType =
+        getTypeConverter()->packFunctionResults(op.getOperandTypes());
 
     Value packed = rewriter.create<LLVM::UndefOp>(loc, packedType);
-    for (unsigned i = 0; i < numArguments; ++i) {
-      packed = rewriter.create<LLVM::InsertValueOp>(
-          loc, packedType, packed, updatedOperands[i],
-          rewriter.getI64ArrayAttr(i));
+    for (auto &it : llvm::enumerate(updatedOperands)) {
+      packed = rewriter.create<LLVM::InsertValueOp>(loc, packed, it.value(),
+                                                    it.index());
     }
     rewriter.replaceOpWithNewOp<LLVM::ReturnOp>(op, TypeRange(), packed,
                                                 op->getAttrs());
@@ -674,24 +665,16 @@ namespace {
 struct ConvertFuncToLLVMPass
     : public ConvertFuncToLLVMBase<ConvertFuncToLLVMPass> {
   ConvertFuncToLLVMPass() = default;
-  ConvertFuncToLLVMPass(bool useBarePtrCallConv, bool emitCWrappers,
-                        unsigned indexBitwidth, bool useAlignedAlloc,
+  ConvertFuncToLLVMPass(bool useBarePtrCallConv, unsigned indexBitwidth,
+                        bool useAlignedAlloc,
                         const llvm::DataLayout &dataLayout) {
     this->useBarePtrCallConv = useBarePtrCallConv;
-    this->emitCWrappers = emitCWrappers;
     this->indexBitwidth = indexBitwidth;
     this->dataLayout = dataLayout.getStringRepresentation();
   }
 
   /// Run the dialect converter on the module.
   void runOnOperation() override {
-    if (useBarePtrCallConv && emitCWrappers) {
-      getOperation().emitError()
-          << "incompatible conversion options: bare-pointer calling convention "
-             "and C wrapper emission";
-      signalPassFailure();
-      return;
-    }
     if (failed(LLVM::LLVMDialect::verifyDataLayoutString(
             this->dataLayout, [this](const Twine &message) {
               getOperation().emitError() << message.str();
@@ -706,7 +689,6 @@ struct ConvertFuncToLLVMPass
     LowerToLLVMOptions options(&getContext(),
                                dataLayoutAnalysis.getAtOrAbove(m));
     options.useBarePtrCallConv = useBarePtrCallConv;
-    options.emitCWrappers = emitCWrappers;
     if (indexBitwidth != kDeriveIndexBitwidthFromDataLayout)
       options.overrideIndexBitwidth(indexBitwidth);
     options.dataLayout = llvm::DataLayout(this->dataLayout);
@@ -745,6 +727,6 @@ mlir::createConvertFuncToLLVMPass(const LowerToLLVMOptions &options) {
   bool useAlignedAlloc =
       (allocLowering == LowerToLLVMOptions::AllocLowering::AlignedAlloc);
   return std::make_unique<ConvertFuncToLLVMPass>(
-      options.useBarePtrCallConv, options.emitCWrappers,
-      options.getIndexBitwidth(), useAlignedAlloc, options.dataLayout);
+      options.useBarePtrCallConv, options.getIndexBitwidth(), useAlignedAlloc,
+      options.dataLayout);
 }

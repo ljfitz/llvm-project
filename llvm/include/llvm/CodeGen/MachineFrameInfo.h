@@ -338,9 +338,9 @@ private:
   uint64_t UnsafeStackSize = 0;
 
 public:
-  explicit MachineFrameInfo(unsigned StackAlignment, bool StackRealignable,
+  explicit MachineFrameInfo(Align StackAlignment, bool StackRealignable,
                             bool ForcedRealign)
-      : StackAlignment(assumeAligned(StackAlignment)),
+      : StackAlignment(StackAlignment),
         StackRealignable(StackRealignable), ForcedRealign(ForcedRealign) {}
 
   MachineFrameInfo(const MachineFrameInfo &) = delete;
@@ -503,6 +503,14 @@ public:
     assert(unsigned(ObjectIdx+NumFixedObjects) < Objects.size() &&
            "Invalid Object Idx!");
     return Objects[ObjectIdx+NumFixedObjects].Alloca;
+  }
+
+  /// Remove the underlying Alloca of the specified stack object if it
+  /// exists. This generally should not be used and is for reduction tooling.
+  void clearObjectAllocation(int ObjectIdx) {
+    assert(unsigned(ObjectIdx + NumFixedObjects) < Objects.size() &&
+           "Invalid Object Idx!");
+    Objects[ObjectIdx + NumFixedObjects].Alloca = nullptr;
   }
 
   /// Return the assigned stack offset of the specified object

@@ -16,9 +16,20 @@
 
 #include "clang/AST/Stmt.h"
 #include "clang/Analysis/FlowSensitive/DataflowEnvironment.h"
+#include "llvm/ADT/Optional.h"
 
 namespace clang {
 namespace dataflow {
+
+struct ContextSensitiveOptions {};
+
+struct TransferOptions {
+  /// Options for analyzing function bodies when present in the translation
+  /// unit, or empty to disable context-sensitive analysis. Note that this is
+  /// fundamentally limited: some constructs, such as recursion, are explicitly
+  /// unsupported.
+  llvm::Optional<ContextSensitiveOptions> ContextSensitiveOpts;
+};
 
 /// Maps statements to the environments of basic blocks that contain them.
 class StmtToEnvMap {
@@ -35,8 +46,9 @@ public:
 ///
 /// Requirements:
 ///
-///  The type of `S` must not be `ParenExpr`.
-void transfer(const StmtToEnvMap &StmtToEnv, const Stmt &S, Environment &Env);
+///  `S` must not be `ParenExpr` or `ExprWithCleanups`.
+void transfer(const StmtToEnvMap &StmtToEnv, const Stmt &S, Environment &Env,
+              TransferOptions Options);
 
 } // namespace dataflow
 } // namespace clang

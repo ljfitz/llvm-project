@@ -117,7 +117,7 @@ void aix::Linker::ConstructJob(Compilation &C, const JobAction &JA,
                     options::OPT_fno_profile_generate, false) ||
        Args.hasArg(options::OPT_fcreate_profile) ||
        Args.hasArg(options::OPT_coverage))
-    CmdArgs.push_back("-bdbg:namedsects");
+    CmdArgs.push_back("-bdbg:namedsects:ss");
 
   // Specify linker output file.
   assert((Output.isFilename() || Output.isNothing()) && "Invalid output.");
@@ -222,11 +222,13 @@ void AIX::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
   llvm::StringRef Sysroot = GetHeaderSysroot(DriverArgs);
   const Driver &D = getDriver();
 
-  // Add the Clang builtin headers (<resource>/include).
   if (!DriverArgs.hasArg(options::OPT_nobuiltininc)) {
     SmallString<128> P(D.ResourceDir);
-    path::append(P, "/include");
-    addSystemInclude(DriverArgs, CC1Args, P.str());
+    // Add the PowerPC intrinsic headers (<resource>/include/ppc_wrappers)
+    path::append(P, "include", "ppc_wrappers");
+    addSystemInclude(DriverArgs, CC1Args, P);
+    // Add the Clang builtin headers (<resource>/include)
+    addSystemInclude(DriverArgs, CC1Args, path::parent_path(P.str()));
   }
 
   // Return if -nostdlibinc is specified as a driver option.
@@ -275,6 +277,8 @@ void AIX::AddCXXStdlibLibArgs(const llvm::opt::ArgList &Args,
     llvm::report_fatal_error("linking libstdc++ unimplemented on AIX");
   case ToolChain::CST_Libcxx:
     CmdArgs.push_back("-lc++");
+    if (Args.hasArg(options::OPT_fexperimental_library))
+      CmdArgs.push_back("-lc++experimental");
     CmdArgs.push_back("-lc++abi");
     return;
   }
