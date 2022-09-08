@@ -2,7 +2,7 @@
 
 func.func @no_block() {
     // expected-error @+1 {{region with 1 blocks}}
-    linalg.fused () {
+    linalg.subgraph () {
     }
     return
 }
@@ -11,7 +11,7 @@ func.func @no_block() {
 
 func.func @no_terminator() {
     // expected-error @+1 {{non-empty block}}
-    linalg.fused () {
+    linalg.subgraph () {
         ^bb0():
     }
     return
@@ -20,7 +20,7 @@ func.func @no_terminator() {
 // -----
 
 func.func @wrong_terminator_args() {
-    linalg.fused () {
+    linalg.subgraph () {
         %0 = arith.constant 0.0 : f32
         // expected-error @+1 {{does not match number of results}}
         linalg.yield %0 : f32
@@ -31,7 +31,7 @@ func.func @wrong_terminator_args() {
 // -----
 
 func.func @wrong_terminator_type() {
-    linalg.fused () {
+    linalg.subgraph () {
         %0 = arith.constant dense<0.0> : tensor<1xf32>
         // expected-error @+1 {{does not match result type}}
         linalg.yield %0 : tensor<1xf32>
@@ -43,7 +43,7 @@ func.func @wrong_terminator_type() {
 
 func.func @non_tensor_result() {
     // expected-error @+1 {{must be ranked tensor}}
-    linalg.fused () {
+    linalg.subgraph () {
         %0 = memref.alloc() : memref<1xf32>
         linalg.yield %0 : memref<1xf32>
     } -> memref<1xf32>

@@ -10,7 +10,7 @@
 // CHECK-LABEL:   func @ancestor_conv_2d_tensor_add(
 // CHECK-SAME:                                      %[[VAL_0:.*]]: tensor<1x1024x10x10xf32>,
 // CHECK-SAME:                                      %[[VAL_1:.*]]: tensor<1x1024x8x8xf32>) -> tensor<1x1024x8x8xf32> {
-// CHECK:           %[[VAL_2:.*]] = linalg.fused(%[[VAL_3:.*]] = %[[VAL_0]] : tensor<1x1024x10x10xf32>, %[[VAL_4:.*]] = %[[VAL_1]] : tensor<1x1024x8x8xf32>) {
+// CHECK:           %[[VAL_2:.*]] = linalg.subgraph(%[[VAL_3:.*]] = %[[VAL_0]] : tensor<1x1024x10x10xf32>, %[[VAL_4:.*]] = %[[VAL_1]] : tensor<1x1024x8x8xf32>) {
 // CHECK:             %[[VAL_5:.*]] = linalg.init_tensor [1, 1024, 8, 8] : tensor<1x1024x8x8xf32>
 // CHECK:             %[[VAL_6:.*]] = arith.constant dense<3.000000e-01> : tensor<1024xf32>
 // CHECK:             %[[VAL_7:.*]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
@@ -35,7 +35,7 @@ func.func @ancestor_conv_2d_tensor_add(%arg0: tensor<1x1024x10x10xf32>, %arg1: t
 // CHECK-LABEL:   func @ancestor_conv_2d_tensor_add_relu(
 // CHECK-SAME:                                           %[[VAL_0:.*]]: tensor<1x1024x17x17xf32>,
 // CHECK-SAME:                                           %[[VAL_1:.*]]: tensor<1x1024x7x7xf32>) -> tensor<1x1024x7x7xf32> {
-// CHECK:           %[[VAL_2:.*]] = linalg.fused(%[[VAL_3:.*]] = %[[VAL_0]] : tensor<1x1024x17x17xf32>, %[[VAL_4:.*]] = %[[VAL_1]] : tensor<1x1024x7x7xf32>) {
+// CHECK:           %[[VAL_2:.*]] = linalg.subgraph(%[[VAL_3:.*]] = %[[VAL_0]] : tensor<1x1024x17x17xf32>, %[[VAL_4:.*]] = %[[VAL_1]] : tensor<1x1024x7x7xf32>) {
 // CHECK:             %[[VAL_5:.*]] = linalg.init_tensor [1, 1024, 7, 7] : tensor<1x1024x7x7xf32>
 // CHECK:             %[[VAL_6:.*]] = arith.constant dense<3.000000e-01> : tensor<1024xf32>
 // CHECK:             %[[VAL_7:.*]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
@@ -62,7 +62,7 @@ func.func @ancestor_conv_2d_tensor_add_relu(%arg0: tensor<1x1024x17x17xf32>, %ar
 // CHECK-LABEL:   func @ancestor_conv_2d_tensor_add_lrelu(
 // CHECK-SAME:                                            %[[VAL_0:.*]]: tensor<1x1024x15x15xf32>,
 // CHECK-SAME:                                            %[[VAL_1:.*]]: tensor<1x1024x13x13xf32>) -> tensor<1x1024x13x13xf32> {
-// CHECK:           %[[VAL_2:.*]] = linalg.fused(%[[VAL_3:.*]] = %[[VAL_0]] : tensor<1x1024x15x15xf32>, %[[VAL_4:.*]] = %[[VAL_1]] : tensor<1x1024x13x13xf32>) {
+// CHECK:           %[[VAL_2:.*]] = linalg.subgraph(%[[VAL_3:.*]] = %[[VAL_0]] : tensor<1x1024x15x15xf32>, %[[VAL_4:.*]] = %[[VAL_1]] : tensor<1x1024x13x13xf32>) {
 // CHECK:             %[[VAL_5:.*]] = arith.constant 2.000000e-02 : f32
 // CHECK:             %[[VAL_6:.*]] = linalg.init_tensor [1, 1024, 13, 13] : tensor<1x1024x13x13xf32>
 // CHECK:             %[[VAL_7:.*]] = arith.constant dense<3.000000e-01> : tensor<1024xf32>
@@ -90,7 +90,7 @@ func.func @ancestor_conv_2d_tensor_add_lrelu(%arg0: tensor<1x1024x15x15xf32>, %a
 // -----
 // CHECK-LABEL:   func @ancestor_same_length_conv_2d_tensor_add(
 // CHECK-SAME:                                                  %[[VAL_0:.*]]: tensor<1x1024x15x15xf32>) -> tensor<1x1024x13x13xf32> {
-// CHECK:           %[[VAL_1:.*]] = linalg.fused(%[[VAL_2:.*]] = %[[VAL_0]] : tensor<1x1024x15x15xf32>) {
+// CHECK:           %[[VAL_1:.*]] = linalg.subgraph(%[[VAL_2:.*]] = %[[VAL_0]] : tensor<1x1024x15x15xf32>) {
 // CHECK:             %[[VAL_3:.*]] = linalg.init_tensor [1, 1024, 13, 13] : tensor<1x1024x13x13xf32>
 // CHECK:             %[[VAL_4:.*]] = arith.constant dense<3.000000e-01> : tensor<1024xf32>
 // CHECK:             %[[VAL_5:.*]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
@@ -98,7 +98,7 @@ func.func @ancestor_conv_2d_tensor_add_lrelu(%arg0: tensor<1x1024x15x15xf32>, %a
 // CHECK:             %[[VAL_7:.*]] = linalg.conv_2d_nchw_fchw {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>} ins(%[[VAL_2]], %[[VAL_5]] : tensor<1x1024x15x15xf32>, tensor<1024x1024x3x3xf32>) outs(%[[VAL_6]] : tensor<1x1024x13x13xf32>) -> tensor<1x1024x13x13xf32>
 // CHECK:             linalg.yield %[[VAL_7]] : tensor<1x1024x13x13xf32>
 // CHECK:           } -> tensor<1x1024x13x13xf32>
-// CHECK:           %[[VAL_8:.*]] = linalg.fused(%[[VAL_9:.*]] = %[[VAL_0]] : tensor<1x1024x15x15xf32>, %[[VAL_10:.*]] = %[[VAL_11:.*]] : tensor<1x1024x13x13xf32>) {
+// CHECK:           %[[VAL_8:.*]] = linalg.subgraph(%[[VAL_9:.*]] = %[[VAL_0]] : tensor<1x1024x15x15xf32>, %[[VAL_10:.*]] = %[[VAL_11:.*]] : tensor<1x1024x13x13xf32>) {
 // CHECK:             %[[VAL_12:.*]] = arith.constant 2.000000e-02 : f32
 // CHECK:             %[[VAL_13:.*]] = linalg.init_tensor [1, 1024, 13, 13] : tensor<1x1024x13x13xf32>
 // CHECK:             %[[VAL_14:.*]] = arith.constant dense<3.000000e-01> : tensor<1024xf32>
@@ -128,7 +128,7 @@ func.func @ancestor_same_length_conv_2d_tensor_add(%arg0: tensor<1x1024x15x15xf3
 // -----
 // CHECK-LABEL:   func @ancestor_conv_2d_tensor_add_same(
 // CHECK-SAME:                                           %[[VAL_0:.*]]: tensor<1x1024x15x15xf32>) -> tensor<1x1024x13x13xf32> {
-// CHECK:           %[[VAL_1:.*]] = linalg.fused(%[[VAL_2:.*]] = %[[VAL_0]] : tensor<1x1024x15x15xf32>) {
+// CHECK:           %[[VAL_1:.*]] = linalg.subgraph(%[[VAL_2:.*]] = %[[VAL_0]] : tensor<1x1024x15x15xf32>) {
 // CHECK:             %[[VAL_3:.*]] = arith.constant 2.000000e-02 : f32
 // CHECK:             %[[VAL_4:.*]] = linalg.init_tensor [1, 1024, 13, 13] : tensor<1x1024x13x13xf32>
 // CHECK:             %[[VAL_5:.*]] = arith.constant dense<3.000000e-01> : tensor<1024xf32>
@@ -159,7 +159,7 @@ func.func @ancestor_conv_2d_tensor_add_same(%arg0: tensor<1x1024x15x15xf32>) -> 
 // CHECK-SAME:                                                  %[[VAL_0:.*]]: tensor<1x1024x15x15xf32>) -> tensor<1x1024x13x13xf32> {
 // CHECK:           %[[VAL_1:.*]] = arith.constant dense<3.000000e-01> : tensor<1024xf32>
 // CHECK:           %[[VAL_2:.*]] = linalg.init_tensor [1, 1024, 13, 13] : tensor<1x1024x13x13xf32>
-// CHECK:           %[[VAL_3:.*]] = linalg.fused(%[[VAL_4:.*]] = %[[VAL_0]] : tensor<1x1024x15x15xf32>) {
+// CHECK:           %[[VAL_3:.*]] = linalg.subgraph(%[[VAL_4:.*]] = %[[VAL_0]] : tensor<1x1024x15x15xf32>) {
 // CHECK:             %[[VAL_5:.*]] = linalg.init_tensor [1, 1024, 13, 13] : tensor<1x1024x13x13xf32>
 // CHECK:             %[[VAL_6:.*]] = arith.constant dense<3.000000e-01> : tensor<1024xf32>
 // CHECK:             %[[VAL_7:.*]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
@@ -177,7 +177,7 @@ func.func @ancestor_conv_2d_tensor_add_same(%arg0: tensor<1x1024x15x15xf32>) -> 
 // CHECK:             %[[VAL_20:.*]] = linalg.pooling_nchw_max {dilations = dense<1> : tensor<2xi64>, strides = dense<2> : tensor<2xi64>} ins(%[[VAL_21:.*]], %[[VAL_11]] : tensor<1x1024x14x14xf32>, tensor<2x2xf32>) outs(%[[VAL_10]] : tensor<1x1024x7x7xf32>) -> tensor<1x1024x7x7xf32>
 // CHECK:             linalg.yield %[[VAL_20]] : tensor<1x1024x7x7xf32>
 // CHECK:           } -> tensor<1x1024x7x7xf32>
-// CHECK:           %[[VAL_22:.*]] = linalg.fused(%[[VAL_23:.*]] = %[[VAL_0]] : tensor<1x1024x15x15xf32>) {
+// CHECK:           %[[VAL_22:.*]] = linalg.subgraph(%[[VAL_23:.*]] = %[[VAL_0]] : tensor<1x1024x15x15xf32>) {
 // CHECK:             %[[VAL_24:.*]] = linalg.init_tensor [1, 1024, 13, 13] : tensor<1x1024x13x13xf32>
 // CHECK:             %[[VAL_25:.*]] = arith.constant dense<3.000000e-01> : tensor<1024xf32>
 // CHECK:             %[[VAL_26:.*]] = arith.constant dense<5.000000e-01> : tensor<1024x1024x3x3xf32>
@@ -185,7 +185,7 @@ func.func @ancestor_conv_2d_tensor_add_same(%arg0: tensor<1x1024x15x15xf32>) -> 
 // CHECK:             %[[VAL_28:.*]] = linalg.conv_2d_nchw_fchw {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>} ins(%[[VAL_23]], %[[VAL_26]] : tensor<1x1024x15x15xf32>, tensor<1024x1024x3x3xf32>) outs(%[[VAL_27]] : tensor<1x1024x13x13xf32>) -> tensor<1x1024x13x13xf32>
 // CHECK:             linalg.yield %[[VAL_28]] : tensor<1x1024x13x13xf32>
 // CHECK:           } -> tensor<1x1024x13x13xf32>
-// CHECK:           %[[VAL_29:.*]] = linalg.fused(%[[VAL_30:.*]] = %[[VAL_31:.*]] : tensor<1x1024x7x7xf32>, %[[VAL_32:.*]] = %[[VAL_33:.*]] : tensor<1x1024x13x13xf32>) {
+// CHECK:           %[[VAL_29:.*]] = linalg.subgraph(%[[VAL_30:.*]] = %[[VAL_31:.*]] : tensor<1x1024x7x7xf32>, %[[VAL_32:.*]] = %[[VAL_33:.*]] : tensor<1x1024x13x13xf32>) {
 // CHECK:             %[[VAL_34:.*]] = arith.constant 2.000000e-02 : f32
 // CHECK:             %[[VAL_35:.*]] = arith.constant 0.000000e+00 : f32
 // CHECK:             %[[VAL_36:.*]] = tensor.pad %[[VAL_30]] low[0, 0, 4, 4] high[0, 0, 4, 4] {

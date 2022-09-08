@@ -3,8 +3,8 @@
 // CHECK-LABEL: func.func @fused_on_tensors(
 // CHECK: %[[arg0:.+]]: tensor<1x3x108x108xf32>
 func.func @fused_on_tensors(%arg0: tensor<1x3x108x108xf32>) -> tensor<1x16x106x106xf32> {
-    // CHECK: %[[result:.+]] linalg.fused (%[[:.+]] = %[[arg0]]
-    %result = linalg.fused (%ifm = %arg0 : tensor<1x3x108x108xf32>) {
+    // CHECK: %[[result:.+]] linalg.subgraph (%[[:.+]] = %[[arg0]]
+    %result = linalg.subgraph (%ifm = %arg0 : tensor<1x3x108x108xf32>) {
         %weights = arith.constant dense<5.000000e-01> : tensor<16x3x3x3xf32>
         %init = arith.constant dense<0.000000e00> : tensor<1x16x106x106xf32>
         %conv = linalg.conv_2d_nchw_fchw
@@ -28,8 +28,8 @@ func.func @fused_on_tensors(%arg0: tensor<1x3x108x108xf32>) -> tensor<1x16x106x1
 // CHECK-LABEL: func.func @drop_unused_captures(
 // CHECK: %[[arg0:.+]]: tensor<3x3xf32>
 func.func @drop_unused_captures(%arg0: tensor<3x3xf32>, %arg1: f32) -> tensor<3x3xf32> {
-    // CHECK: linalg.fused (%[[:.+]] = %[[arg0]] : tensor<3x3xf32>)
-    %result = linalg.fused (%0 = %arg0 : tensor<3x3xf32>, %1 = %arg1 : f32) {
+    // CHECK: linalg.subgraph (%[[:.+]] = %[[arg0]] : tensor<3x3xf32>)
+    %result = linalg.subgraph (%0 = %arg0 : tensor<3x3xf32>, %1 = %arg1 : f32) {
         linalg.yield %0 : tensor<3x3xf32>
     } -> tensor<3x3xf32>
     return %result : tensor<3x3xf32>
@@ -40,8 +40,8 @@ func.func @drop_unused_captures(%arg0: tensor<3x3xf32>, %arg1: f32) -> tensor<3x
 // CHECK-LABEL: func.func @drop_unused_result(
 // CHECK: %[[arg0:.+]]: tensor<3x3xf32>
 func.func @drop_unused_result(%arg0: memref<3x3xf32>) -> memref<3x3xf32> {
-    // CHECK: linalg.fused (%[[dest:.+]] = %[[arg0]] : memref<3x3xf32>)
-    %result = linalg.fused (%dest = %arg0 : memref<3x3xf32>) {
+    // CHECK: linalg.subgraph (%[[dest:.+]] = %[[arg0]] : memref<3x3xf32>)
+    %result = linalg.subgraph (%dest = %arg0 : memref<3x3xf32>) {
         %cst0 = arith.constant 0.000000e00 : f32
         // CHECK: linalg.fill
         // CHECK: outs(%[[dest]] : memref<3x3xf32>)
@@ -63,22 +63,22 @@ func.func @drop_unused_result(%arg0: memref<3x3xf32>) -> memref<3x3xf32> {
 func.func @erase_dead(%arg0: tensor<3x3xf32>) -> tensor<3x3xf32> {
     %arg1 = bufferization.to_memref %arg0 : memref<3x3xf32>
     // Trivially dead
-    linalg.fused (%0 = %arg0 : tensor<3x3xf32>, %1 = %arg1 : memref<3x3xf32>) {
+    linalg.subgraph (%0 = %arg0 : tensor<3x3xf32>, %1 = %arg1 : memref<3x3xf32>) {
         linalg.yield
     }
     // No side-effects
-    %0 = linalg.fused () {
+    %0 = linalg.subgraph () {
         %0 = linalg.init_tensor [3, 3] : tensor<3x3xf32>
         linalg.yield %0 : tensor<3x3xf32>
     } -> tensor<3x3xf32>
     // Read-only side-effects
-    linalg.fused (%0 = %arg1 : memref<3x3xf32>) {
+    linalg.subgraph (%0 = %arg1 : memref<3x3xf32>) {
         %1 = memref.alloc() : memref<3x3xf32>
         memref.copy %0, %1 : memref<3x3xf32> to memref<3x3xf32>
         linalg.yield
     }
     // Trivially empty
-    %1 = linalg.fused (%0 = %arg0 : tensor<3x3xf32>) {
+    %1 = linalg.subgraph (%0 = %arg0 : tensor<3x3xf32>) {
         linalg.yield %0 : tensor<3x3xf32>
     } -> tensor<3x3xf32>
     // CHECK: return %[[arg0]]
