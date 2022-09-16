@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 //
 // This file implements the Linalg structural fusion pass. It creates
-// linalg.fused ops based on external fusion recipes.
+// linalg.subgraph ops based on external fusion recipes.
 //
 //===----------------------------------------------------------------------===//
 
@@ -43,8 +43,8 @@ static bool matches(Operation *op, OperatorClass filter) {
   return (linalg::classifyOperator(op) & filter) != OperatorClass::None;
 }
 
-/// Determines whether @p target can be wrapped in a `linalg.fused` operation.
-static bool canWrapInFusedOp(Operation *target) {
+/// Determines whether @p target can be wrapped in a `linalg.subgraph` operation.
+static bool canWrapInSubgraph(Operation *target) {
   if (!target)
     return false;
 
@@ -92,11 +92,11 @@ static void collectUses(Operation *root, Operation *op,
   }
 }
 
-/// Wraps @p target in a `linalg.fused` operation.
+/// Wraps @p target in a `linalg.subgraph` operation.
 ///
-/// See canWrapInFusedOp() on what scenarios this transformation is allowed in.
+/// See canWrapInSubgraph() on what scenarios this transformation is allowed in.
 ///
-/// @pre      `canWrapInFusedOp(target)`
+/// @pre      `canWrapInSubgraph(target)`
 ///
 /// Given IR of the form:
 /// ```mlir
@@ -105,26 +105,26 @@ static void collectUses(Operation *root, Operation *op,
 ///
 /// This produces:
 /// ```mlir
-/// %r = linalg.fused (%c_0 = %o_0, ...) {
+/// %r = linalg.subgraph (%c_0 = %o_0, ...) {
 ///   %w = target %c_0, ...
 ///   linalg.yield %w
 /// }
 /// ```
-static FusedOp wrapInFusedOp(Operation *target) {
-  assert(canWrapInFusedOp(target));
+static SubgraphOp wrapInSubgraph(Operation *target) {
+  assert(canWrapInSubgraph(target));
 
   SmallVector<Value> captures;
   collectUses(target, target, captures);
 
-  // Create the FusedOp.
+  // Create the Subgraph.
   OpBuilder builder(target);
-  auto fusedOp = builder.create<FusedOp>(
+  auto subgraph = builder.create<SubgraphOp>(
       target->getLoc(),
       /*resulType=*/target->getNumResults() ? target->getResult(0).getType()
                                             : Type{},
       /*captures=*/captures,
       [=](OpBuilder &builder, Location loc, BlockAndValueMapping &captures) {
-        // Clone the target op into the FusedOp.
+        // Clone the target op into the Subgraph.
         auto clonedOp = builder.insert(target->clone(captures));
         // Yield the result of the cloned op (which may have none).
         builder.create<linalg::YieldOp>(target->getLoc(),
@@ -132,13 +132,13 @@ static FusedOp wrapInFusedOp(Operation *target) {
       });
 
   // Remove the target operation.
-  target->replaceAllUsesWith(fusedOp);
+  target->replaceAllUsesWith(subgraph);
   target->erase();
-  return fusedOp;
+  return subgraph;
 }
 
 /// Determines whether @p target contains wrapped op that can be unwrapped.
-static bool canUnwrapFusedOp(FusedOp target) {
+static bool canUnwrapSubgraph(SubgraphOp target) {
   auto body = &target.getBody().front();
 
   // - exactly one wrapped op must be contained (plus terminator)
@@ -151,20 +151,20 @@ static bool canUnwrapFusedOp(FusedOp target) {
   return llvm::equal(terminator->getOperands(), wrapped->getResults());
 }
 
-/// Unwraps the single op inside the `linalg.fused` @p target op.
+/// Unwraps the single op inside the `linalg.subgraph` @p target op.
 ///
-/// See canUnwrapFusedOp() on what scenarios this transformation is allowed in.
+/// See canUnwrapSubgraph() on what scenarios this transformation is allowed in.
 ///
-/// @pre      `canUnwrapFusedOp(target)`
+/// @pre      `canUnwrapSubgraph(target)`
 ///
-/// Essentially exactly undoes what wrapInFusedOp() does.
-static Operation *unwrapFusedOp(FusedOp target) {
-  assert(canUnwrapFusedOp(target));
+/// Essentially exactly undoes what wrapInSubgraph() does.
+static Operation *unwrapSubgraph(SubgraphOp target) {
+  assert(canUnwrapSubgraph(target));
 
   // Compute the mapping from captured arguments to operands.
   auto unCaptureMapping = target.getUnCaptureMapping();
 
-  // Clone the wrapped op out of the FusedOp.
+  // Clone the wrapped op out of the Subgraph.
   OpBuilder builder(target);
   auto unwrapped = builder.insert(
       target.getBody().front().getOperations().front().clone(unCaptureMapping));
@@ -176,7 +176,7 @@ static Operation *unwrapFusedOp(FusedOp target) {
 }
 
 /// Determines whether @p producer is duplicated when prepended to @p target .
-static bool mustDuplicateProducer(FusedOp target, Operation *producer) {
+static bool mustDuplicateProducer(SubgraphOp target, Operation *producer) {
   assert(producer);
 
   // Duplicates if there is one user of a result of producer that is not target.
@@ -187,7 +187,7 @@ static bool mustDuplicateProducer(FusedOp target, Operation *producer) {
 }
 
 /// Determines whether @p producer can be prepended to @p target .
-static bool canFuseProducer(FusedOp target, Operation *producer) {
+static bool canFuseProducer(SubgraphOp target, Operation *producer) {
   if (!producer)
     return false;
 
@@ -219,14 +219,14 @@ static unsigned resultIndex(Value value) {
 /// Given IR of the form:
 /// ```mlir
 /// %r_0, ..., %r_N = producer %o_0, ...
-/// %z = linalg.fused (%x_0 = %y_0, ..., %x_i = %r_i, ...) {
+/// %z = linalg.subgraph (%x_0 = %y_0, ..., %x_i = %r_i, ...) {
 ///   ...
 /// }
 /// ```
 ///
 /// This produces:
 /// ```mlir
-/// %z = linalg.fused (%x_0 = %y_0, ..., %o_0, ...) {
+/// %z = linalg.subgraph (%x_0 = %y_0, ..., %o_0, ...) {
 ///   %x_i, ... = producer %o_0, ...
 ///   ...
 /// }
@@ -235,7 +235,7 @@ static unsigned resultIndex(Value value) {
 /// If @p producer had any users beside @p target , a duplicate of the operation
 /// will remain. canFuseProducer() therefore checks if this does not cause
 /// added side-effects.
-static FusedOp fuseProducer(FusedOp target, Operation *producer) {
+static SubgraphOp fuseProducer(SubgraphOp target, Operation *producer) {
   assert(canFuseProducer(target, producer));
 
   // Determine which captures will still be needed and what is dropped.
@@ -257,9 +257,9 @@ static FusedOp fuseProducer(FusedOp target, Operation *producer) {
   // Ensure all operands to producer are captured.
   collectUses(producer, producer, newCaptures);
 
-  // Create the new FusedOp.
+  // Create the new Subgraph.
   OpBuilder builder(target);
-  auto result = builder.create<FusedOp>(
+  auto result = builder.create<SubgraphOp>(
       target.getLoc(),
       /*resultType=*/target.result() ? target.result().getType() : Type{},
       newCaptures,
@@ -267,7 +267,7 @@ static FusedOp fuseProducer(FusedOp target, Operation *producer) {
         // Clone the op to be prepended into the new block.
         auto prepended = builder.insert(producer->clone(captures));
 
-        // Remap the capture arguments of the old FusedOp.
+        // Remap the capture arguments of the old Subgraph.
         for (unsigned idx = 0; idx < target.captures().size(); ++idx) {
           captures.map(target.getCaptureArgs()[idx],
                        captures.lookup(target.captures()[idx]));
@@ -295,7 +295,7 @@ static FusedOp fuseProducer(FusedOp target, Operation *producer) {
 }
 
 /// Determines whether @p consumer can be appended to @p target .
-static bool canFuseConsumer(FusedOp target, Operation *consumer) {
+static bool canFuseConsumer(SubgraphOp target, Operation *consumer) {
   if (!consumer)
     return false;
 
@@ -309,7 +309,7 @@ static bool canFuseConsumer(FusedOp target, Operation *consumer) {
     return false;
 
   // - consumer must be wrappable
-  return canWrapInFusedOp(consumer);
+  return canWrapInSubgraph(consumer);
 }
 
 /// Computes the length of the longest path from \p op to the function entry
@@ -346,7 +346,7 @@ static size_t computeAncestorLength(Operation *op) {
 ///
 /// Given IR of the form:
 /// ```mlir
-/// %z = linalg.fused (%x_0 = %y_0, ...) {
+/// %z = linalg.subgraph (%x_0 = %y_0, ...) {
 ///   ...
 /// }
 /// %r = consumer %o_0, ..., %z, ...
@@ -354,13 +354,13 @@ static size_t computeAncestorLength(Operation *op) {
 ///
 /// This produces:
 /// ```mlir
-/// %r = linalg.fused (%x_0 = %y_0, ..., %o_0, ...) {
+/// %r = linalg.subgraph (%x_0 = %y_0, ..., %o_0, ...) {
 ///   ...
 ///   %r = consumer %o_0, ..., %z, ...
 ///   linalg.yield %r
 /// }
 /// ```
-static FusedOp fuseConsumer(FusedOp target, Operation *consumer) {
+static SubgraphOp fuseConsumer(SubgraphOp target, Operation *consumer) {
   assert(canFuseConsumer(target, consumer));
 
   // Ensure that all operands of consumer are captured.
@@ -369,16 +369,16 @@ static FusedOp fuseConsumer(FusedOp target, Operation *consumer) {
   llvm::erase_if(newCaptures,
                  [&](Value capture) { return capture == target.result(); });
 
-  // Create the new FusedOp.
+  // Create the new Subgraph.
   OpBuilder builder(consumer);
-  auto result = builder.create<FusedOp>(
+  auto result = builder.create<SubgraphOp>(
       target.getLoc(),
       /*resultType=*/consumer->getNumResults()
           ? consumer->getResult(0).getType()
           : Type{},
       newCaptures,
       [&](OpBuilder &builder, Location loc, BlockAndValueMapping &captures) {
-        // Remap the capture arguments of the old FusedOp.
+        // Remap the capture arguments of the old Subgraph.
         for (unsigned idx = 0; idx < target.captures().size(); ++idx) {
           captures.map(target.getCaptureArgs()[idx],
                        captures.lookup(target.captures()[idx]));
@@ -560,23 +560,23 @@ struct LinalgStructuralFusionPass
 private:
   Optional<Strategy> strategy;
 
-  using WorkingSet = llvm::SmallVector<FusedOp>;
+  using WorkingSet = llvm::SmallVector<SubgraphOp>;
 
   // Check whether \p target is the longest ancestor of \p consumer. Ancestors
   // that are not a fused operation or are not part of \p work are ignored.
-  bool isLongestAncestor(WorkingSet &work, FusedOp target,
+  bool isLongestAncestor(WorkingSet &work, SubgraphOp target,
                          Operation *consumer) {
     if (!consumer)
       return false;
 
-    // Keep track of the longest path and the FusedOp linked to it
-    FusedOp longestAncestorFuse = nullptr;
+    // Keep track of the longest path and the Subgraph linked to it
+    SubgraphOp longestAncestorFuse = nullptr;
     size_t longestAncestorLength = 0;
     for (unsigned idx = 0; idx < consumer->getNumOperands(); ++idx) {
       Operation *ancestor = consumer->getOperand(idx).getDefiningOp();
 
       // Skip any operands that are not a fused op or not part of the worklist
-      auto fusedAncestor = dyn_cast_or_null<FusedOp>(ancestor);
+      auto fusedAncestor = dyn_cast_or_null<SubgraphOp>(ancestor);
       if (!fusedAncestor || llvm::find(work, fusedAncestor) == work.end())
         continue;
 
@@ -589,7 +589,7 @@ private:
       }
     }
 
-    // target is the longest ancestor if it is the same FusedOp that was found
+    // target is the longest ancestor if it is the same Subgraph that was found
     // to have the longest path
     assert(longestAncestorFuse && "No ancestor found!");
     return longestAncestorFuse == target;
@@ -601,15 +601,15 @@ private:
     size_t result = 0;
     work.clear();
     getOperation().walk([&](Operation *op, const WalkStage &stage) {
-      if (isa<FusedOp>(op)) {
+      if (isa<SubgraphOp>(op)) {
         // Do not look into fused ops.
         return WalkResult::skip();
       }
 
       if (matches(op, filter)) {
         // Seed this op, but do not look into it.
-        if (canWrapInFusedOp(op)) {
-          work.push_back(wrapInFusedOp(op));
+        if (canWrapInSubgraph(op)) {
+          work.push_back(wrapInSubgraph(op));
           ++result;
         }
         return WalkResult::skip();
@@ -621,7 +621,7 @@ private:
     return result;
   }
 
-  FailureOr<FusedOp> fuseFirstProducer(FusedOp target, OperatorClass filter) {
+  FailureOr<SubgraphOp> fuseFirstProducer(SubgraphOp target, OperatorClass filter) {
     for (auto op : target.getOperands()) {
       auto candidate = op.getDefiningOp();
       if (!candidate || !matches(candidate, filter) ||
@@ -634,7 +634,7 @@ private:
     return failure();
   }
 
-  FailureOr<FusedOp> fuseProducers(FusedOp target, OperatorClass filter) {
+  FailureOr<SubgraphOp> fuseProducers(SubgraphOp target, OperatorClass filter) {
     auto result = false;
     while (true) {
       auto fused = fuseFirstProducer(target, filter);
@@ -653,7 +653,7 @@ private:
 
   size_t fuseProducers(WorkingSet &work, OperatorClass filter) {
     WorkingSet results;
-    llvm::erase_if(work, [&](FusedOp op) {
+    llvm::erase_if(work, [&](SubgraphOp op) {
       auto fused = fuseProducers(op, filter);
       if (failed(fused))
         return false;
@@ -673,7 +673,7 @@ private:
     return result;
   }
 
-  FailureOr<FusedOp> fuseConsumer(FusedOp target, OperatorClass filter,
+  FailureOr<SubgraphOp> fuseConsumer(SubgraphOp target, OperatorClass filter,
                                   WorkingSet &work, bool longestAncestor) {
     if (!target.result())
       return failure();
@@ -701,7 +701,7 @@ private:
   size_t fuseConsumers(WorkingSet &work, OperatorClass filter,
                        bool longestAncestor = false) {
     WorkingSet results;
-    llvm::erase_if(work, [&](FusedOp op) {
+    llvm::erase_if(work, [&](SubgraphOp op) {
       auto fused = fuseConsumer(op, filter, work, longestAncestor);
       if (failed(fused))
         return false;
@@ -723,11 +723,11 @@ private:
 
   size_t dissolve(WorkingSet &work) {
     size_t result = 0;
-    llvm::erase_if(work, [&](FusedOp op) {
-      if (!canUnwrapFusedOp(op))
+    llvm::erase_if(work, [&](SubgraphOp op) {
+      if (!canUnwrapSubgraph(op))
         return false;
 
-      unwrapFusedOp(op);
+      unwrapSubgraph(op);
       ++result;
       return true;
     });

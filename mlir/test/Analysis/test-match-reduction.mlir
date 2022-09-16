@@ -61,7 +61,7 @@ func.func @linalg_red_max(%in0t: tensor<4x4xf32>, %out0t: tensor<4xf32>) {
 // -----
 
 // expected-remark@below {{Testing function}}
-func.func @linalg_fused_red_add(%in0t: tensor<4x4xf32>, %out0t: tensor<4xf32>) {
+func.func @linalg_subgraph_red_add(%in0t: tensor<4x4xf32>, %out0t: tensor<4xf32>) {
   // expected-remark@below {{Reduction found in output #0!}}
   // expected-remark@below {{Reduced Value: %2 = arith.subf %1, %arg2 : f32}}
   // expected-remark@below {{Combiner Op: %3 = arith.addf %2, %arg3 : f32}}

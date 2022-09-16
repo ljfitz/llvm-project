@@ -701,10 +701,10 @@ LogicalResult GlobalAveragePool2DOp::verify() {
 }
 
 //===----------------------------------------------------------------------===//
-// FusedOp
+// Subgraph
 //===----------------------------------------------------------------------===//
 
-void FusedOp::print(OpAsmPrinter &p) {
+void SubgraphOp::print(OpAsmPrinter &p) {
   // (%arg0 = %capture0 : type, ...)
   p << '(';
   llvm::interleaveComma(
@@ -773,7 +773,7 @@ static ParseResult parseCaptures(
 }
 
 
-ParseResult FusedOp::parse(OpAsmParser &p, OperationState &state) {
+ParseResult SubgraphOp::parse(OpAsmParser &p, OperationState &state) {
   SmallVector<OpAsmParser::Argument> captureArgs;
 
   // (%arg0 = %capture0 : type, ...)
@@ -796,7 +796,7 @@ ParseResult FusedOp::parse(OpAsmParser &p, OperationState &state) {
   return success();
 }
 
-LogicalResult FusedOp::verify() {
+LogicalResult SubgraphOp::verify() {
   // NOTE: SizedRegion<1> already verifie that:
   //       - there's a single block.
   // NOTE: SingleBlockImplicitTerminator already verified that:
@@ -830,7 +830,7 @@ LogicalResult FusedOp::verify() {
 
 using BodyBuilder = void(OpBuilder &, Location, BlockAndValueMapping &);
 
-void FusedOp::build(OpBuilder &builder, OperationState &state, Type resultType,
+void SubgraphOp::build(OpBuilder &builder, OperationState &state, Type resultType,
                     ValueRange captures,
                     function_ref<BodyBuilder> bodyBuilder) {
   if (resultType)
@@ -859,7 +859,7 @@ void FusedOp::build(OpBuilder &builder, OperationState &state, Type resultType,
   bodyBuilder(builder, state.location, captureMapping);
 }
 
-void FusedOp::build(OpBuilder &builder, OperationState &state,
+void SubgraphOp::build(OpBuilder &builder, OperationState &state,
                     ValueRange captures,
                     function_ref<BodyBuilder> bodyBuilder) {
   build(builder, state, Type{}, captures, bodyBuilder);
@@ -867,10 +867,10 @@ void FusedOp::build(OpBuilder &builder, OperationState &state,
 
 namespace {
 
-struct DropUnusedCaptures : OpRewritePattern<FusedOp> {
-  using OpRewritePattern<FusedOp>::OpRewritePattern;
+struct DropUnusedCaptures : OpRewritePattern<SubgraphOp> {
+  using OpRewritePattern<SubgraphOp>::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(FusedOp op,
+  LogicalResult matchAndRewrite(SubgraphOp op,
                                 PatternRewriter &rewriter) const override {
     // Find all unused arguments.
     auto unused = llvm::to_vector(llvm::make_filter_range(
@@ -890,16 +890,16 @@ struct DropUnusedCaptures : OpRewritePattern<FusedOp> {
   }
 };
 
-struct DropUnusedResult : OpRewritePattern<FusedOp> {
-  using OpRewritePattern<FusedOp>::OpRewritePattern;
+struct DropUnusedResult : OpRewritePattern<SubgraphOp> {
+  using OpRewritePattern<SubgraphOp>::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(FusedOp op,
+  LogicalResult matchAndRewrite(SubgraphOp op,
                                 PatternRewriter &rewriter) const override {
     if (!op.result() || !op.result().getUses().empty())
       return failure();
 
     // Replace this op with a new op that does not have any results.
-    auto newOp = rewriter.create<FusedOp>(op.getLoc(), op.captures());
+    auto newOp = rewriter.create<SubgraphOp>(op.getLoc(), op.captures());
     BlockAndValueMapping removedArgs;
     op.body().cloneInto(&newOp.getBodyRegion(), removedArgs);
     rewriter.setInsertionPointToEnd(&newOp.getBody().front());
@@ -910,10 +910,10 @@ struct DropUnusedResult : OpRewritePattern<FusedOp> {
   }
 };
 
-struct EraseEmptyFusedOp : OpRewritePattern<FusedOp> {
-  using OpRewritePattern<FusedOp>::OpRewritePattern;
+struct EraseEmptySubgraph : OpRewritePattern<SubgraphOp> {
+  using OpRewritePattern<SubgraphOp>::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(FusedOp op,
+  LogicalResult matchAndRewrite(SubgraphOp op,
                                 PatternRewriter &rewriter) const override {
     auto terminator = op.getBody().front().getTerminator();
     if (terminator != &op.getBody().front().getOperations().front())
@@ -934,16 +934,16 @@ struct EraseEmptyFusedOp : OpRewritePattern<FusedOp> {
 
 } // namespace
 
-void FusedOp::getCanonicalizationPatterns(RewritePatternSet &results,
+void SubgraphOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                           MLIRContext *context) {
-  results.add<DropUnusedCaptures, DropUnusedResult, EraseEmptyFusedOp>(context);
+  results.add<DropUnusedCaptures, DropUnusedResult, EraseEmptySubgraph>(context);
 }
 
-OperatorClass FusedOp::getOperatorClass() { return OperatorClass::None; }
+OperatorClass SubgraphOp::getOperatorClass() { return OperatorClass::None; }
 
 using MemoryEffect = SideEffects::EffectInstance<MemoryEffects::Effect>;
 
-void FusedOp::getEffects(SmallVectorImpl<MemoryEffect> &effects) {
+void SubgraphOp::getEffects(SmallVectorImpl<MemoryEffect> &effects) {
   struct ArgEffect {
     /*implicit*/ ArgEffect(Value capture) : capture(capture), effects() {}
 
@@ -983,14 +983,14 @@ void FusedOp::getEffects(SmallVectorImpl<MemoryEffect> &effects) {
   }
 }
 
-OperandRange FusedOp::getSuccessorEntryOperands(Optional<unsigned> index) {
+OperandRange SubgraphOp::getSuccessorEntryOperands(Optional<unsigned> index) {
   assert(index.value() == 0 && "invalid region index");
 
   // The body takes the captured values.
   return captures();
 }
 
-void FusedOp::getSuccessorRegions(Optional<unsigned> index,
+void SubgraphOp::getSuccessorRegions(Optional<unsigned> index,
                                   ArrayRef<Attribute> operands,
                                   SmallVectorImpl<RegionSuccessor> &regions) {
   if (index.has_value()) {
@@ -1005,7 +1005,7 @@ void FusedOp::getSuccessorRegions(Optional<unsigned> index,
   regions.push_back(RegionSuccessor(&getBodyRegion(), getCaptureArgs()));
 }
 
-void FusedOp::getRegionInvocationBounds(
+void SubgraphOp::getRegionInvocationBounds(
     ArrayRef<Attribute> operands,
     SmallVectorImpl<InvocationBounds> &invocationBounds) {
   // The body is executed exactly once.
@@ -1865,8 +1865,8 @@ LogicalResult linalg::YieldOp::verify() {
   if (auto linalgOp = dyn_cast<LinalgOp>(parentOp))
     return verifyYield(*this, linalgOp);
 
-  if (auto fusedOp = dyn_cast<FusedOp>(parentOp)) {
-    // We perform this verification in the FusedOp.
+  if (auto subgraphOp = dyn_cast<SubgraphOp>(parentOp)) {
+    // We perform this verification in the Subgraph.
     return success();
   }
 

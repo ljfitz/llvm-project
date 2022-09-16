@@ -216,8 +216,8 @@ def Linalg_GlobalAveragePool2DOp : Linalg_Op<"globalaveragepool2d", [NoSideEffec
   let hasVerifier = 1;
 }
 
-def Linalg_FusedOp
-    : Linalg_Op<"fused", [
+def Linalg_SubgraphOp
+    : Linalg_Op<"subgraph", [
         IsolatedFromAbove,
         DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
         DeclareOpInterfaceMethods<LinalgOperatorClassInterface>,
@@ -229,8 +229,8 @@ def Linalg_FusedOp
         SingleBlockImplicitTerminator<"YieldOp">]> {
   let summary = "Fused operator region";
   let description = [{
-    The `linalg.fused` operation declares a single block that collects
-    operations that produce a tensor value in a single fused loop nest, with
+    The `linalg.subgraph` operation declares a single block that collects
+    operations that produce a tensor value in a single region, with
     all intermediary values being buffered internally and/or scalar replaced.
 
     All values used within this block must be explicitly captured.
@@ -243,7 +243,7 @@ def Linalg_FusedOp
 
     ```mlir
     %0 = ... : tensor<1x3x108x108xf32>
-    %1 = linalg.fused (%ifm = %0 : tensor<1x3x108x108xf32>) {
+    %1 = linalg.subgraph (%ifm = %0 : tensor<1x3x108x108xf32>) {
       %0 = linalg.conv2d_nchw ins(%ifm: ...
       %1 = linalg.relu2d_nchw ins(%0: ...
       linalg.yield %1 : tensor<1x3x106x106xf32>

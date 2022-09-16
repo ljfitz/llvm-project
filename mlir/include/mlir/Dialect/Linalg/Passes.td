@@ -146,7 +146,7 @@ def LinalgUnfuse : Pass<"linalg-unfuse", "func::FuncOp"> {
 }
 
 def LinalgStructuralFusion : Pass<"linalg-structural-fusion", "func::FuncOp"> {
-  let summary = "Performs structural fusion based on the linalg.fused op";
+  let summary = "Performs structural fusion based on the linalg.subgraph op";
   let constructor = "mlir::createLinalgStructuralFusionPass()";
   let dependentDialects = [
     "linalg::LinalgDialect",
