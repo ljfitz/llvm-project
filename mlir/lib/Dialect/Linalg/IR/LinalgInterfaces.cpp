@@ -857,6 +857,7 @@ FailureOr<OperatorClass> mlir::linalg::parseOperatorClass(StringRef str) {
         .Case("pool", OperatorClass::Pooling)
         .Case("pad", OperatorClass::Padding)
         .Case("bcast", OperatorClass::Broadcast)
+        .Case("fused", OperatorClass::Fused)
         .Default(llvm::None);
   };
 
@@ -903,6 +904,7 @@ raw_ostream& mlir::linalg::operator<<(raw_ostream &os, OperatorClass value) {
     case OperatorClass::Pooling: return "pool";
     case OperatorClass::Padding: return "pad";
     case OperatorClass::Broadcast: return "bcast";
+    case OperatorClass::Fused: return "fused";
     default: llvm_unreachable("unknown OperatorClass item");
     }
   };

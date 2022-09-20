@@ -47,7 +47,9 @@ enum class OperatorClass {
   Padding = 1 << 6,
   /// Broadcasted operator.
   Broadcast = 1 << 7,
-  LLVM_MARK_AS_BITMASK_ENUM(Broadcast)
+  /// Fused Operator.
+  Fused = 1 << 8,
+  LLVM_MARK_AS_BITMASK_ENUM(Fused)
 };
 
 FailureOr<OperatorClass> parseOperatorClass(StringRef str);

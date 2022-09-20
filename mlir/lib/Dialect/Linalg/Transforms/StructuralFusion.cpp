@@ -601,11 +601,6 @@ private:
     size_t result = 0;
     work.clear();
     getOperation().walk([&](Operation *op, const WalkStage &stage) {
-      if (isa<FusedOp>(op)) {
-        // Do not look into fused ops.
-        return WalkResult::skip();
-      }
-
       if (matches(op, filter)) {
         // Seed this op, but do not look into it.
         if (canWrapInFusedOp(op)) {

@@ -939,7 +939,7 @@ void FusedOp::getCanonicalizationPatterns(RewritePatternSet &results,
   results.add<DropUnusedCaptures, DropUnusedResult, EraseEmptyFusedOp>(context);
 }
 
-OperatorClass FusedOp::getOperatorClass() { return OperatorClass::None; }
+OperatorClass FusedOp::getOperatorClass() { return OperatorClass::Fused; }
 
 using MemoryEffect = SideEffects::EffectInstance<MemoryEffects::Effect>;
 
@@ -2312,10 +2312,10 @@ struct OperatorClassInterfaceFallback
     if (isa<tensor::PadOp>(op))
       return OperatorClass::Padding;
     if (isa<Conv2DReluOp, Conv2DLreluOp>(op))
-      return OperatorClass::Convolution | OperatorClass::Activation;
+      return OperatorClass::Convolution | OperatorClass::Activation | OperatorClass::Fused;
     if (isa<Conv2DLreluMaxpoolOp>(op))
       return OperatorClass::Convolution | OperatorClass::Activation |
-             OperatorClass::Padding | OperatorClass::Pooling;
+             OperatorClass::Padding | OperatorClass::Pooling | OperatorClass::Fused;
 
     //
     // Guessing
