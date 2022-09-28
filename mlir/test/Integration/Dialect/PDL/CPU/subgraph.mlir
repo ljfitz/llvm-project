@@ -3,69 +3,46 @@
 module @patterns {
 
   pdl.pattern : benefit(1) {
-    // Define input and types
-    %in_type = pdl.type
-    %other_type = pdl.type
-    // %subgraph_type = pdl.type
-    %alpha_const_type = pdl.type
-    %alpha_const_type2 = pdl.type
 
-    // %out_type = pdl.type
-    %alpha_attr = pdl.attribute
-    %alpha_attr2 = pdl.attribute
-
-    %in_operand = pdl.operand : %in_type
-    // %other_operand = pdl.operand : %other_type
-
-    // Define ops for sugraph fusion
-    %CONST_0 = pdl.operation "tosa.const" {"value" = %alpha_attr} -> (%alpha_const_type : !pdl.type)
-    %CONST_0_RESULT = pdl.result 0 of %CONST_0
-
-
-
-
+    // ( ( transpose -> maxpool ) -> transpose )
     // %7 = "tosa.transpose"(%5, %6) : (tensor<1x3x128x128xf32>, tensor<4xi32>) -> tensor<1x128x128x3xf32>
     // %8 = "tosa.max_pool2d"(%7) {kernel = [2, 2], pad = [0, 0, 0, 0], stride = [2, 2]} : (tensor<1x128x128x3xf32>) -> tensor<1x64x64x3xf32>
+    // %10 = "tosa.transpose"(%8, %9) : (tensor<1x64x64x3xf32>, tensor<4xi32>) -> tensor<1x3x64x64xf32>
 
+    %ARG0_TYPE = pdl.type
+    %ARG1_TYPE = pdl.type
+    %ARG2_TYPE = pdl.type
+    %TRANSPOSE_TYPE = pdl.type
+    %MAXPOOL_TYPE = pdl.type
+    %TRANSPOSE_TWO_TYPE = pdl.type
 
+    %ARG0 = pdl.operand : %ARG0_TYPE
+    %ARG1 = pdl.operand : %ARG1_TYPE
+    %ARG2 = pdl.operand : %ARG2_TYPE
 
+    %TRANSPOSE_OP = pdl.operation "tosa.transpose" (%ARG0, %ARG1 : !pdl.value, !pdl.value) -> (%TRANSPOSE_TYPE : !pdl.type)
+    %TRANSPOSE_VALUE = pdl.result 0 of %TRANSPOSE_OP
 
-    %op1 = pdl.operation "tosa.const" {"value" = %alpha_attr2} -> (%alpha_const_type2 : !pdl.type)
-    %val1 = pdl.result 0 of %op1
+    %MAXPOOL_OP = pdl.operation "tosa.max_pool2d" (%TRANSPOSE_VALUE : !pdl.value) -> (%MAXPOOL_TYPE : !pdl.type)
+    %MAXPOOL_VALUE = pdl.result 0 of %MAXPOOL_OP
 
-    %op2 = pdl.operation "tosa.mul" (%in_operand, %val1 : !pdl.value, !pdl.value) -> (%in_type : !pdl.type)
-    %val2 = pdl.result 0 of %op2
+    %TRANSPOSE_TWO_OP = pdl.operation "tosa.transpose" (%MAXPOOL_VALUE, %ARG2 : !pdl.value, !pdl.value) -> (%TRANSPOSE_TWO_TYPE : !pdl.type)
+    %TRANSPOSE_TWO_VALUE = pdl.result 0 of %TRANSPOSE_TWO_OP
 
-
-    %op3 = pdl.operation "tosa.greater_equal" (%in_operand, %CONST_0_RESULT : !pdl.value, !pdl.value) -> (%other_type : !pdl.type)
-    %val3 = pdl.result 0 of %op3
-
-    // pdl.replace %root with (%inputOperand)
-    // pdl.rewrite %op2 with "createSubgraph"
-
+    // %alpha_attr = pdl.attribute
+    // %op1 = pdl.operation "tosa.const" {"value" = %alpha_attr2} -> (%alpha_const_type2 : !pdl.type)
+    // %val1 = pdl.result 0 of %op1
 
     // Rewrite rule
     pdl.rewrite {
 
-      %subgraphOp = pdl.apply_native_rewrite "createSubgraphOp" (%op2 : !pdl.operation) : !pdl.operation
-      %subgraphOpTwo = pdl.apply_native_rewrite "createSubgraphOp" (%op3 : !pdl.operation) : !pdl.operation
+      %SUBGRAPH_OP = pdl.apply_native_rewrite "createSubgraphOp" (%TRANSPOSE_OP : !pdl.operation) : !pdl.operation
+      // %SUBGRAPH_TWO_OP = pdl.apply_native_rewrite "createSubgraphOp" (%SUBGRAPH_OP : !pdl.operation) : !pdl.operation
 
+      %SUBGRAPH_THREE_OP = pdl.apply_native_rewrite "createSubgraphOp" (%TRANSPOSE_TWO_OP : !pdl.operation) : !pdl.operation
 
-      // pdl.apply_native_rewrite "addOpToSubgraphOp" (%subgraphOp, %op3 : !pdl.operation, !pdl.operation)
-
-      //1pdl.replace %op3 with 1%val3 : !pdl.value)
-
-
-
-      // %op6 = pdl.operation "linalg.subgraph" (%in_operand : !pdl.value) -> (%in_type : !pdl.type)
-      // // registerRewriteFunction
-
-      // %val6 = pdl.result 0 of %op3
-      // pdl.replace %op2 with (%val6 : !pdl.value) 
-      
-      // pdl.erase %op1
-      // pdl.erase %op2
-
+      // %SUBGRAPH_TWO_OP = pdl.apply_native_rewrite "createSubgraphOp" (%MAXPOOL_OP : !pdl.operation) : !pdl.operation
+      pdl.apply_native_rewrite "addOpToSubgraphOp" (%SUBGRAPH_OP, %MAXPOOL_OP : !pdl.operation, !pdl.operation)
     }
   }
 }
