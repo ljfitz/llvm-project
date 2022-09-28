@@ -9,8 +9,8 @@
 #ifndef LLVM_LIBC_SRC_STDIO_PRINTF_CORE_INT_CONVERTER_H
 #define LLVM_LIBC_SRC_STDIO_PRINTF_CORE_INT_CONVERTER_H
 
-#include "src/__support/CPP/ArrayRef.h"
-#include "src/__support/CPP/StringView.h"
+#include "src/__support/CPP/span.h"
+#include "src/__support/CPP/string_view.h"
 #include "src/__support/integer_to_string.h"
 #include "src/stdio/printf_core/converter_utils.h"
 #include "src/stdio/printf_core/core_structs.h"
@@ -27,15 +27,14 @@ namespace printf_core {
 constexpr char inline to_lower(char a) { return a | 32; }
 constexpr bool inline is_lower(char a) { return (a & 32) > 0; }
 
-cpp::optional<cpp::StringView> inline num_to_strview(
-    uintmax_t num, cpp::MutableArrayRef<char> bufref, char conv_name) {
+cpp::optional<cpp::string_view> inline num_to_strview(
+    uintmax_t num, cpp::span<char> bufref, char conv_name) {
   if (to_lower(conv_name) == 'x') {
-    return IntegerToString<uintmax_t, 16>::convert(num, bufref,
-                                                   is_lower(conv_name));
+    return IntegerToString::hex(num, bufref, is_lower(conv_name));
   } else if (conv_name == 'o') {
-    return IntegerToString<uintmax_t, 8>::convert(num, bufref, true);
+    return IntegerToString::oct(num, bufref);
   } else {
-    return IntegerToString<uintmax_t, 10>::convert(num, bufref, true);
+    return IntegerToString::dec(num, bufref);
   }
 }
 
@@ -66,10 +65,8 @@ int inline convert_int(Writer *writer, const FormatSection &to_conv) {
 
   num = apply_length_modifier(num, to_conv.length_modifier);
 
-  static constexpr size_t BUFSIZE = IntegerToString<uintmax_t, 8>::BUFSIZE;
-  char buff[BUFSIZE];
-  cpp::MutableArrayRef<char> bufref(buff, BUFSIZE);
-  auto str = num_to_strview(num, bufref, to_conv.conv_name);
+  char buf[IntegerToString::oct_bufsize<intmax_t>()];
+  auto str = num_to_strview(num, buf, to_conv.conv_name);
   if (!str)
     return INT_CONVERSION_ERROR;
 
