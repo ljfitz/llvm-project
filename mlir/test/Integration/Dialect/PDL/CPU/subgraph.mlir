@@ -1,5 +1,7 @@
 // RUN: mlir-opt %s  -allow-unregistered-dialect -test-pdl-bytecode-pass -split-input-file | FileCheck %s
 
+// -----
+
 module @patterns {
 
   pdl.pattern : benefit(1) {
@@ -37,7 +39,7 @@ module @patterns {
     // Rewrite rules
     pdl.rewrite {
 
-      // Patterns are applied independently from each other
+      // Patterns are applied independently from each other.
       // Ensure that we do not match inside subgraph ops by modifying `applyPatternsAndFoldGreedily`.
 
       %SUBGRAPH_OP = pdl.apply_native_rewrite "createSubgraphOp" (%TRANSPOSE_OP : !pdl.operation) : !pdl.operation
@@ -48,7 +50,27 @@ module @patterns {
   }
 }
 
-
+// CHECK-LABEL:   module @ir attributes {test.mlp_split} {
+// CHECK:           func.func @forward(%[[VAL_0:.*]]: tensor<1x3x128x128xf32>) -> tensor<1x3x64x64xf32> {
+// CHECK:             %[[VAL_1:.*]] = "tosa.const"() {value = dense<[0, 3, 1, 2]> : tensor<4xi32>} : () -> tensor<4xi32>
+// CHECK:             %[[VAL_2:.*]] = "tosa.const"() {value = dense<[0, 2, 3, 1]> : tensor<4xi32>} : () -> tensor<4xi32>
+// CHECK:             %[[VAL_3:.*]] = "tosa.const"() {value = dense<1.000000e-01> : tensor<f32>} : () -> tensor<f32>
+// CHECK:             %[[VAL_4:.*]] = "tosa.const"() {value = dense<0.000000e+00> : tensor<f32>} : () -> tensor<f32>
+// CHECK:             %[[VAL_5:.*]] = "tosa.greater_equal"(%[[VAL_0]], %[[VAL_4]]) : (tensor<1x3x128x128xf32>, tensor<f32>) -> tensor<1x3x128x128xi1>
+// CHECK:             %[[VAL_6:.*]] = "tosa.mul"(%[[VAL_0]], %[[VAL_3]]) {shift = 0 : i32} : (tensor<1x3x128x128xf32>, tensor<f32>) -> tensor<1x3x128x128xf32>
+// CHECK:             %[[VAL_7:.*]] = "tosa.select"(%[[VAL_5]], %[[VAL_0]], %[[VAL_6]]) : (tensor<1x3x128x128xi1>, tensor<1x3x128x128xf32>, tensor<1x3x128x128xf32>) -> tensor<1x3x128x128xf32>
+// CHECK:             %[[VAL_8:.*]] = linalg.subgraph(%[[VAL_9:.*]] = %[[VAL_7]] : tensor<1x3x128x128xf32>, %[[VAL_10:.*]] = %[[VAL_2]] : tensor<4xi32>, %[[VAL_11:.*]] = %[[VAL_1]] : tensor<4xi32>) {
+// CHECK:               %[[VAL_12:.*]] = linalg.subgraph(%[[VAL_13:.*]] = %[[VAL_9]] : tensor<1x3x128x128xf32>, %[[VAL_14:.*]] = %[[VAL_10]] : tensor<4xi32>) {
+// CHECK:                 %[[VAL_15:.*]] = "tosa.transpose"(%[[VAL_13]], %[[VAL_14]]) : (tensor<1x3x128x128xf32>, tensor<4xi32>) -> tensor<1x128x128x3xf32>
+// CHECK:                 %[[VAL_16:.*]] = "tosa.max_pool2d"(%[[VAL_15]]) {kernel = [2, 2], pad = [0, 0, 0, 0], stride = [2, 2]} : (tensor<1x128x128x3xf32>) -> tensor<1x64x64x3xf32>
+// CHECK:                 linalg.yield %[[VAL_16]] : tensor<1x64x64x3xf32>
+// CHECK:               } -> tensor<1x64x64x3xf32>
+// CHECK:               %[[VAL_17:.*]] = "tosa.transpose"(%[[VAL_18:.*]], %[[VAL_11]]) : (tensor<1x64x64x3xf32>, tensor<4xi32>) -> tensor<1x3x64x64xf32>
+// CHECK:               linalg.yield %[[VAL_17]] : tensor<1x3x64x64xf32>
+// CHECK:             } -> tensor<1x3x64x64xf32>
+// CHECK:             return %[[VAL_19:.*]] : tensor<1x3x64x64xf32>
+// CHECK:           }
+// CHECK:         }
 module @ir attributes { test.mlp_split } {
   func.func @forward(%arg0: tensor<1x3x128x128xf32>) -> tensor<1x3x64x64xf32> {
     %1 = "tosa.const"() {value = dense<1.000000e-01> : tensor<f32>} : () -> tensor<f32>
