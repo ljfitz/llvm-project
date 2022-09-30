@@ -68,7 +68,8 @@ static bool canWrapInSubgraph(Operation *target) {
   }
 }
 
-/// Collects @p op is used and traverses graph based on the @p root operation
+/// Collects non-local @p op uses and traverses graph based on the @p root
+/// operation
 static void collectUses(Operation *root, Operation *op,
                         SmallVectorImpl<Value> &uses) {
   const auto isLocal = [&](Value value) {
@@ -92,8 +93,8 @@ static void collectUses(Operation *root, Operation *op,
 
   llvm::for_each(op->getOperands(), unite);
 
-  for (auto &region : op->getRegions()) {
-    for (auto &op : region.getOps()) {
+  for (Region &region : op->getRegions()) {
+    for (Operation &op : region.getOps()) {
       collectUses(root, &op, uses);
     }
   }
@@ -119,8 +120,8 @@ static void collectUses(Operation *root, Operation *op,
 /// ```
 static linalg::SubgraphOp wrapInSubgraph(PatternRewriter &rewriter,
                                          Operation *target) {
-
   assert(canWrapInSubgraph(target));
+  assert(target->getResults().size() == 1);
 
   SmallVector<Value> captures;
   collectUses(target, target, captures);
@@ -215,6 +216,7 @@ static size_t computeAncestorLength(Operation *op) {
 static linalg::SubgraphOp fuseConsumer(linalg::SubgraphOp target,
                                        Operation *consumer) {
   assert(canFuseConsumer(target, consumer));
+  assert(consumer->getResults().size() == 1);
 
   // Ensure that all operands of consumer are captured.
   auto newCaptures = llvm::to_vector(target.captures());
@@ -242,7 +244,7 @@ static linalg::SubgraphOp fuseConsumer(linalg::SubgraphOp target,
           builder.insert(op.clone(captures));
         }
 
-        // If the old fused op had a result, add it to the mapping.
+        // If the old subgraph op had a result, add it to the mapping.
         auto terminator = target.getBody().front().getTerminator();
         if (terminator->getNumOperands())
           captures.map(target.result(),
