@@ -26,7 +26,7 @@ public:
   /// generally more efficient in compile time.  When set to false, its initial
   /// traversal of the region tree is bottom up on each block, which may match
   /// larger patterns when given an ambiguous pattern set.
-  bool useTopDownTraversal = false;
+  bool useTopDownTraversal = true;
 
   // Perform control flow optimizations to the region tree after applying all
   // patterns.
@@ -35,7 +35,7 @@ public:
   /// This specifies the maximum number of times the rewriter will iterate
   /// between applying patterns and simplifying regions. Use `kNoIterationLimit`
   /// to disable this iteration limit.
-  int64_t maxIterations = 10;
+  int64_t maxIterations = 1;
 
   static constexpr int64_t kNoIterationLimit = -1;
 };

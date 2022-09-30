@@ -11,9 +11,15 @@ add_mlir_library(MLIRTransformUtils
   TopologicalSortUtils.cpp
 
   ADDITIONAL_HEADER_DIRS
+  ${MLIR_MAIN_INCLUDE_DIR}/mlir/Dialect/Linalg
   ${MLIR_MAIN_INCLUDE_DIR}/mlir/Transforms
 
+  DEPENDS
+  MLIRLinalgPassIncGen
+
   LINK_LIBS PUBLIC
+  MLIRIR
+  MLIRLinalgDialect
   MLIRAnalysis
   MLIRLoopLikeInterface
   MLIRRewrite

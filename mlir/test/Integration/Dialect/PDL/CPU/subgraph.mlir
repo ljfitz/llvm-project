@@ -10,39 +10,40 @@ module @patterns {
     // %10 = "tosa.transpose"(%8, %9) : (tensor<1x64x64x3xf32>, tensor<4xi32>) -> tensor<1x3x64x64xf32>
 
     %ARG0_TYPE = pdl.type
-    %ARG1_TYPE = pdl.type
-    %ARG2_TYPE = pdl.type
-    %TRANSPOSE_TYPE = pdl.type
-    %MAXPOOL_TYPE = pdl.type
-    %TRANSPOSE_TWO_TYPE = pdl.type
-
     %ARG0 = pdl.operand : %ARG0_TYPE
+    %ARG1_TYPE = pdl.type
     %ARG1 = pdl.operand : %ARG1_TYPE
-    %ARG2 = pdl.operand : %ARG2_TYPE
-
+    %TRANSPOSE_TYPE = pdl.type
     %TRANSPOSE_OP = pdl.operation "tosa.transpose" (%ARG0, %ARG1 : !pdl.value, !pdl.value) -> (%TRANSPOSE_TYPE : !pdl.type)
     %TRANSPOSE_VALUE = pdl.result 0 of %TRANSPOSE_OP
 
+    %MAXPOOL_TYPE = pdl.type
     %MAXPOOL_OP = pdl.operation "tosa.max_pool2d" (%TRANSPOSE_VALUE : !pdl.value) -> (%MAXPOOL_TYPE : !pdl.type)
     %MAXPOOL_VALUE = pdl.result 0 of %MAXPOOL_OP
 
-    %TRANSPOSE_TWO_OP = pdl.operation "tosa.transpose" (%MAXPOOL_VALUE, %ARG2 : !pdl.value, !pdl.value) -> (%TRANSPOSE_TWO_TYPE : !pdl.type)
+    %CONST_TYPE = pdl.type
+    %CONST_ATTR = pdl.attribute
+    %CONST_OP = pdl.operation "tosa.const" {"value" = %CONST_ATTR} -> (%CONST_TYPE : !pdl.type)
+    %CONST_VALUE = pdl.result 0 of %CONST_OP
+
+    %TRANSPOSE_TWO_TYPE = pdl.type
+    %TRANSPOSE_TWO_OP = pdl.operation "tosa.transpose" (%MAXPOOL_VALUE, %CONST_VALUE : !pdl.value, !pdl.value) -> (%TRANSPOSE_TWO_TYPE : !pdl.type)
     %TRANSPOSE_TWO_VALUE = pdl.result 0 of %TRANSPOSE_TWO_OP
 
     // %alpha_attr = pdl.attribute
     // %op1 = pdl.operation "tosa.const" {"value" = %alpha_attr2} -> (%alpha_const_type2 : !pdl.type)
     // %val1 = pdl.result 0 of %op1
 
-    // Rewrite rule
+    // Rewrite rules
     pdl.rewrite {
 
+      // Patterns are applied independently from each other
+      // Ensure that we do not match inside subgraph ops by modifying `applyPatternsAndFoldGreedily`.
+
       %SUBGRAPH_OP = pdl.apply_native_rewrite "createSubgraphOp" (%TRANSPOSE_OP : !pdl.operation) : !pdl.operation
-      // %SUBGRAPH_TWO_OP = pdl.apply_native_rewrite "createSubgraphOp" (%SUBGRAPH_OP : !pdl.operation) : !pdl.operation
-
-      %SUBGRAPH_THREE_OP = pdl.apply_native_rewrite "createSubgraphOp" (%TRANSPOSE_TWO_OP : !pdl.operation) : !pdl.operation
-
-      // %SUBGRAPH_TWO_OP = pdl.apply_native_rewrite "createSubgraphOp" (%MAXPOOL_OP : !pdl.operation) : !pdl.operation
-      pdl.apply_native_rewrite "addOpToSubgraphOp" (%SUBGRAPH_OP, %MAXPOOL_OP : !pdl.operation, !pdl.operation)
+      %SUBGRAPH_TWO_OP = pdl.apply_native_rewrite "addOpToSubgraphOp" (%SUBGRAPH_OP, %MAXPOOL_OP : !pdl.operation, !pdl.operation) : !pdl.operation
+      %SUBGRAPH_THREE_OP = pdl.apply_native_rewrite "createSubgraphOp" (%SUBGRAPH_TWO_OP : !pdl.operation) : !pdl.operation
+      %SUBGRAPH_FOUR_OP = pdl.apply_native_rewrite "addOpToSubgraphOp" (%SUBGRAPH_THREE_OP, %TRANSPOSE_TWO_OP : !pdl.operation, !pdl.operation) : !pdl.operation
     }
   }
 }

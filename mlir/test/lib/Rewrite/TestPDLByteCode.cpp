@@ -117,7 +117,8 @@ static void collectUses(Operation *root, Operation *op,
 ///   linalg.yield %w
 /// }
 /// ```
-static Operation *wrapInSubgraph(PatternRewriter &rewriter, Operation *target) {
+static linalg::SubgraphOp wrapInSubgraph(PatternRewriter &rewriter,
+                                         Operation *target) {
 
   assert(canWrapInSubgraph(target));
 
@@ -142,8 +143,7 @@ static Operation *wrapInSubgraph(PatternRewriter &rewriter, Operation *target) {
   // Remove the target operation.
   target->replaceAllUsesWith(subgraph);
   target->erase();
-
-  return subgraph.getOperation();
+  return subgraph;
 }
 
 /// Determines whether @p consumer can be appended to @p target .
@@ -212,10 +212,8 @@ static size_t computeAncestorLength(Operation *op) {
 ///   linalg.yield %r
 /// }
 /// ```
-static linalg::SubgraphOp fuseConsumer(Operation *subgraphOp,
+static linalg::SubgraphOp fuseConsumer(linalg::SubgraphOp target,
                                        Operation *consumer) {
-
-  linalg::SubgraphOp target = static_cast<linalg::SubgraphOp>(subgraphOp);
   assert(canFuseConsumer(target, consumer));
 
   // Ensure that all operands of consumer are captured.
@@ -264,15 +262,15 @@ static linalg::SubgraphOp fuseConsumer(Operation *subgraphOp,
   return result;
 }
 
+/// Subgraph callback functions
 static Operation *createSubgraphOp(PatternRewriter &rewriter, Operation *op) {
-  op->dump();
-  return wrapInSubgraph(rewriter, op);
+  return wrapInSubgraph(rewriter, op).getOperation();
 }
 
-static void addOpToSubgraphOp(PatternRewriter &rewriter, Operation *subgraphOp,
-                              Operation *op) {
-  // subgraphOp->dump();
-  fuseConsumer(subgraphOp, op);
+static Operation *addOpToSubgraphOp(PatternRewriter &rewriter,
+                                    Operation *subgraphOp, Operation *op) {
+  linalg::SubgraphOp target = static_cast<linalg::SubgraphOp>(subgraphOp);
+  return fuseConsumer(target, op).getOperation();
 }
 
 /// Custom rewriter invoked from PDL.

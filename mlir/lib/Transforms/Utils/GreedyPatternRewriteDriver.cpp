@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Rewrite/PatternApplicator.h"
@@ -181,6 +182,10 @@ bool GreedyPatternRewriteDriver::simplify(MutableArrayRef<Region> regions) {
     changed = false;
     while (!worklist.empty()) {
       auto *op = popFromWorklist();
+
+      // Do not apply patterns to `linalg.subgraph` ops
+      if (isa<linalg::SubgraphOp>(op))
+        continue;
 
       // Nulls get added to the worklist when operations are removed, ignore
       // them.
@@ -388,6 +393,11 @@ mlir::applyPatternsAndFoldGreedily(MutableArrayRef<Region> regions,
                                    GreedyRewriteConfig config) {
   if (regions.empty())
     return success();
+
+  regions[0].getParentOp()->dump();
+
+  // op->dump();
+  //   return mlir::failure();
 
   // The top-level operation must be known to be isolated from above to
   // prevent performing canonicalizations on operations defined at or above
