@@ -51,15 +51,8 @@ target_link_libraries(LibcMemoryHelpers LibcUnitTest)
 add_dependencies(
   LibcMemoryHelpers
   LibcUnitTest
-  libc.src.__support.CPP.array_ref
+  libc.src.__support.CPP.span
 )
-
-if(NOT LLVM_LIBC_FULL_BUILD) # TODO(michaelrj): make a more permanant solution.
-  return()
-endif()
-
-#currently stdio is fullbuild only, so this matcher that depends on a piece of
-#printf also has to be fullbuild only.
 
 add_library(
   LibcPrintfHelpers
