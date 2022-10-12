@@ -41,11 +41,18 @@ module @patterns {
 
       // Patterns are applied independently from each other.
       // Ensure that we do not match inside subgraph ops by modifying `applyPatternsAndFoldGreedily`.
+            // Patterns are applied independently from each other.
+      // Ensure that we do not match inside subgraph ops by modifying `applyPatternsAndFoldGreedily`.
 
-      %SUBGRAPH_OP = pdl.apply_native_rewrite "createSubgraphOp" (%TRANSPOSE_OP : !pdl.operation) : !pdl.operation
-      %SUBGRAPH_TWO_OP = pdl.apply_native_rewrite "addOpToSubgraphOp" (%SUBGRAPH_OP, %MAXPOOL_OP : !pdl.operation, !pdl.operation) : !pdl.operation
-      %SUBGRAPH_THREE_OP = pdl.apply_native_rewrite "createSubgraphOp" (%SUBGRAPH_TWO_OP : !pdl.operation) : !pdl.operation
-      %SUBGRAPH_FOUR_OP = pdl.apply_native_rewrite "addOpToSubgraphOp" (%SUBGRAPH_THREE_OP, %TRANSPOSE_TWO_OP : !pdl.operation, !pdl.operation) : !pdl.operation
+      // pdl.apply_native_rewrite "createSubgraphOp" (%TRANSPOSE_OP, %MAXPOOL_OP: !pdl.operation, !pdl.operation) : !pdl.operation
+
+      // pdl.apply_native_rewrite "createSubgraphOp" (%TRANSPOSE_OP, %MAXPOOL_OP, %CONST_OP, %TRANSPOSE_TWO_OP: !pdl.operation, !pdl.operation, !pdl.operation, !pdl.operation) : !pdl.operation
+
+      %NESTED_SUBGRAPH = pdl.apply_native_rewrite "createSubgraphOp" (%TRANSPOSE_OP, %MAXPOOL_OP: !pdl.operation, !pdl.operation) : !pdl.operation
+      %SUBGRAPH =pdl.apply_native_rewrite "createSubgraphOp" (%NESTED_SUBGRAPH, %CONST_OP, %TRANSPOSE_TWO_OP: !pdl.operation, !pdl.operation, !pdl.operation) : !pdl.operation
+
+
+
     }
   }
 }

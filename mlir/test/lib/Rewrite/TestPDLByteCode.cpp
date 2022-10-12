@@ -11,6 +11,10 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "mlir/TableGen/Operator.h"
+#include "mlir/IR/PatternMatch.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Tosa/IR/TosaOps.h"
 
 using namespace mlir;
 
@@ -147,6 +151,116 @@ static linalg::SubgraphOp wrapInSubgraph(PatternRewriter &rewriter,
   return subgraph;
 }
 
+static func::CallOp
+  outline(PatternRewriter &rewriter,
+    Operation *mainOp,
+          const SmallVector<mlir::Operation *, 2> &accompaniedOps,
+          const std::string &funcName) {
+   if (mainOp == nullptr)
+      return nullptr;
+
+    auto module = mainOp->getParentOfType<mlir::ModuleOp>();
+
+    // The list of all operations that need to be outlined.
+    SmallVector<Operation *, 2> outlineOps = accompaniedOps;
+    outlineOps.push_back(mainOp);
+    // The list of return values of function which is equal to the results of
+    // mainOp.
+    SmallVector<Value, 2> outlineRets;
+    // The return types of the isolated function.
+    SmallVector<mlir::Type> retTypes;
+    // The values that need to be defined as the argument.
+    SmallVector<Value, 2> outlineArgs;
+
+    // Check all the operands of mainOp and see if they have been defined with
+    // in accompaniedOps. If they haven't been defined in accompaniedOps, they
+    // need to be defined as block argument.
+    auto checkOperands = [&](Operation *oper) -> void {
+      llvm::for_each(oper->getOperands(), [&](Value operand) {
+          if (operand.dyn_cast<BlockArgument>() ||
+            llvm::none_of(accompaniedOps, [&](Operation *op) {
+              return (operand.getDefiningOp() == op);
+            }))
+            outlineArgs.push_back(operand);
+      });
+    };
+
+
+    llvm::for_each(outlineOps, checkOperands);
+
+    // Add the results and result types of mainOp to the list of return values
+    // and return types respectively.
+    llvm::for_each(mainOp->getResults(), [&](Value result) {
+      outlineRets.push_back(result);
+      retTypes.push_back(result.getType());
+    });
+
+    MLIRContext *context = mainOp->getContext();
+    auto loc = mainOp->getLoc();
+
+    SmallVector<mlir::Type, 2> argTypes;
+    llvm::for_each(outlineArgs,
+                   [&](Value value) { argTypes.push_back(value.getType()); });
+
+    // Resolve the name of the new function .
+    std::string newFname = funcName;
+    int whichTry = 0;
+    while (module.lookupSymbol(newFname) != nullptr)
+      newFname = funcName + "_" + std::to_string(++whichTry);
+
+    // Create the new function operation and a block to it.
+    auto funcType = mlir::FunctionType::get(context, argTypes, retTypes);
+    auto function =
+        func::FuncOp::create(loc, newFname, funcType, /* attrs = */ {});
+    auto &entryBlock = *function.addEntryBlock();
+
+    // Map outlined values to the new block arguments.
+    BlockAndValueMapping mapper;
+    int idx = 0;
+    llvm::for_each(outlineArgs, [&](Value value) {
+      mapper.map(value, entryBlock.getArgument(idx++));
+    });
+      
+    // Clone all operations into the function and create a mapping.
+    SmallVector<Value, 4> rets;
+    llvm::for_each(outlineOps, [&](Operation *op) {
+      Operation *clone = op->clone(mapper);
+      llvm::for_each(llvm::zip(op->getResults(), clone->getResults()),
+                     [&](auto resultPair) {
+                       mapper.map(std::get<0>(resultPair),
+                                  std::get<1>(resultPair));
+                     });
+      entryBlock.push_back(clone);
+      // Store the result of cloned mainOp as return values for the outlined
+      // function.
+      if (op == mainOp) {
+        auto results = clone->getResults();
+        rets.append(results.begin(), results.end());
+      }
+    });
+
+    // Create return operation for the function
+    auto funcBuilder = OpBuilder::atBlockEnd(&entryBlock);
+    funcBuilder.create<func::ReturnOp>(loc, rets);
+
+    // Create a call operation to the created function and replace mainOp with
+    // the callOp.
+    auto builder = OpBuilder(mainOp);
+    auto call = builder.create<func::CallOp>(loc, function, outlineArgs);
+
+    idx = 0;
+    llvm::for_each(call.getResults(), [&](OpResult result) {
+      outlineRets[idx++].replaceAllUsesWith(result);
+    });
+
+    // This pass only erases mainOp and doesn't erase the operation in
+    // accompaniedOps. The operations in the accompaniedOps are only cloned.
+    mainOp->erase();
+
+    module.push_back(function);
+    return call;
+  }
+
 /// Determines whether @p consumer can be appended to @p target .
 static bool canFuseConsumer(linalg::SubgraphOp target, Operation *consumer) {
   if (!consumer)
@@ -264,10 +378,57 @@ static linalg::SubgraphOp fuseConsumer(linalg::SubgraphOp target,
   return result;
 }
 
+static linalg::SubgraphOp
+  wrapInSubgraphMultiple(Operation *target,
+                 SmallVector<Operation *> accompaniedOps) {
+
+    SmallVector<Value> captures;
+    auto captureOperands = [&](Operation *op) -> void {
+      llvm::for_each(op->getOperands(), [&](Value operand) {
+        if (operand.dyn_cast<BlockArgument>() ||
+            llvm::none_of(accompaniedOps, [&](Operation *op) {
+              return (operand.getDefiningOp() == op);
+            }))
+          captures.push_back(operand);
+      });
+    };
+
+    llvm::for_each(accompaniedOps, captureOperands);
+    captureOperands(target);
+
+    // Create the Subgraph.
+    OpBuilder builder(target);
+    auto subgraph = builder.create<linalg::SubgraphOp>(
+        target->getLoc(),
+        /*resulType=*/target->getNumResults() ? target->getResult(0).getType()
+                                              : Type{},
+        /*captures=*/captures,
+        [=](OpBuilder &builder, Location loc, BlockAndValueMapping &captures) {
+          // Clone the target op into the Subgraph.
+          for(auto op: accompaniedOps)
+            builder.insert(op->clone(captures));
+          auto clonedOp = builder.insert(target->clone(captures));
+          // Yield the result of the cloned op (which may have none).
+          builder.create<linalg::YieldOp>(target->getLoc(),
+                                          clonedOp->getResults());
+        });
+
+    // Remove the target operation.
+    target->replaceAllUsesWith(subgraph);
+    target->erase();
+    return subgraph;
+  }
+
 /// Subgraph callback functions
-static Operation *createSubgraphOp(PatternRewriter &rewriter, Operation *op) {
-  return wrapInSubgraph(rewriter, op).getOperation();
+static void createSubgraphOp(PatternRewriter &rewriter, PDLResultList &results, ArrayRef<PDLValue> args) {
+  llvm::errs()<<"#######################\n";
+  llvm::SmallVector<Operation *> ops;
+  for(int i=0;i<args.size()-1;i++)
+    ops.push_back(args[i].cast<Operation*>());
+  Operation *mainOp = args.back().cast<Operation*>();
+  results.push_back(wrapInSubgraphMultiple(mainOp, ops).getOperation());
 }
+
 
 static Operation *addOpToSubgraphOp(PatternRewriter &rewriter,
                                     Operation *subgraphOp, Operation *op) {
