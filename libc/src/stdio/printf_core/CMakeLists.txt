@@ -32,17 +32,6 @@ add_object_library(
 )
 
 add_object_library(
-  file_writer
-  SRCS
-    file_writer.cpp
-  HDRS
-    file_writer.h
-  DEPENDS
-    libc.src.__support.File.file
-    .core_structs
-)
-
-add_object_library(
   writer
   SRCS
     writer.cpp
@@ -70,10 +59,11 @@ add_object_library(
   DEPENDS
     .writer
     .core_structs
-    libc.src.__support.integer_to_string
     libc.src.__support.CPP.limits
+    libc.src.__support.CPP.span
     libc.src.__support.CPP.string_view
     libc.src.__support.FPUtil.fputil
+    libc.src.__support.integer_to_string
 )
 
 
@@ -89,6 +79,23 @@ add_object_library(
     .writer
     .core_structs
     libc.src.__support.arg_list
+)
+
+if(NOT (TARGET libc.src.__support.File.file))
+  # Not all platforms have a file implementation. If file is unvailable,
+  # then we must skip all file based printf sections.
+  return()
+endif()
+
+add_object_library(
+  file_writer
+  SRCS
+    file_writer.cpp
+  HDRS
+    file_writer.h
+  DEPENDS
+    libc.src.__support.File.file
+    .core_structs
 )
 
 add_object_library(
