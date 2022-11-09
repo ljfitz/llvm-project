@@ -242,12 +242,16 @@ void Writer::layoutMemory() {
     if (config->relocatable || config->isPic)
       return;
     memoryPtr = alignTo(memoryPtr, stackAlignment);
+    if (WasmSym::stackLow)
+      WasmSym::stackLow->setVA(memoryPtr);
     if (config->zStackSize != alignTo(config->zStackSize, stackAlignment))
       error("stack size must be " + Twine(stackAlignment) + "-byte aligned");
     log("mem: stack size  = " + Twine(config->zStackSize));
     log("mem: stack base  = " + Twine(memoryPtr));
     memoryPtr += config->zStackSize;
     setGlobalPtr(cast<DefinedGlobal>(WasmSym::stackPointer), memoryPtr);
+    if (WasmSym::stackHigh)
+      WasmSym::stackHigh->setVA(memoryPtr);
     log("mem: stack top   = " + Twine(memoryPtr));
   };
 
@@ -445,6 +449,11 @@ void Writer::populateTargetFeatures() {
     allowed.insert("mutable-globals");
   }
 
+  if (config->extraFeatures.has_value()) {
+    auto &extraFeatures = config->extraFeatures.value();
+    allowed.insert(extraFeatures.begin(), extraFeatures.end());
+  }
+
   // Only infer used features if user did not specify features
   bool inferFeatures = !config->features.has_value();
 
@@ -624,7 +633,7 @@ void Writer::calculateImports() {
       shouldImport(WasmSym::indirectFunctionTable))
     out.importSec->addImport(WasmSym::indirectFunctionTable);
 
-  for (Symbol *sym : symtab->getSymbols()) {
+  for (Symbol *sym : symtab->symbols()) {
     if (!shouldImport(sym))
       continue;
     if (sym == WasmSym::indirectFunctionTable)
@@ -645,7 +654,7 @@ void Writer::calculateExports() {
   unsigned globalIndex =
       out.importSec->getNumImportedGlobals() + out.globalSec->numGlobals();
 
-  for (Symbol *sym : symtab->getSymbols()) {
+  for (Symbol *sym : symtab->symbols()) {
     if (!sym->isExported())
       continue;
     if (!sym->isLive())
@@ -689,7 +698,7 @@ void Writer::populateSymtab() {
   if (!config->relocatable && !config->emitRelocs)
     return;
 
-  for (Symbol *sym : symtab->getSymbols())
+  for (Symbol *sym : symtab->symbols())
     if (sym->isUsedInRegularObj && sym->isLive())
       out.linkingSec->addToSymtab(sym);
 
@@ -743,7 +752,7 @@ void Writer::createCommandExportWrappers() {
 
   std::vector<DefinedFunction *> toWrap;
 
-  for (Symbol *sym : symtab->getSymbols())
+  for (Symbol *sym : symtab->symbols())
     if (sym->isExported())
       if (auto *f = dyn_cast<DefinedFunction>(sym))
         toWrap.push_back(f);
@@ -1661,7 +1670,8 @@ void Writer::run() {
     return;
 
   if (Error e = buffer->commit())
-    fatal("failed to write the output file: " + toString(std::move(e)));
+    fatal("failed to write output '" + buffer->getPath() +
+          "': " + toString(std::move(e)));
 }
 
 // Open a result file.

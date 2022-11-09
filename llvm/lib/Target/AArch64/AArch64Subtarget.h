@@ -47,6 +47,8 @@ public:
     AppleA12,
     AppleA13,
     AppleA14,
+    AppleA15,
+    AppleA16,
     Carmel,
     CortexA35,
     CortexA53,
@@ -74,6 +76,7 @@ public:
     NeoverseN2,
     Neoverse512TVB,
     NeoverseV1,
+    NeoverseV2,
     Saphira,
     ThunderX2T99,
     ThunderX,
@@ -109,6 +112,9 @@ protected:
 
   // ReserveXRegister[i] - X#i is not available as a general purpose register.
   BitVector ReserveXRegister;
+
+  // ReserveXRegisterForRA[i] - X#i is not available for register allocator.
+  BitVector ReserveXRegisterForRA;
 
   // CustomCallUsedXRegister[i] - X#i call saved.
   BitVector CustomCallSavedXRegs;
@@ -196,7 +202,13 @@ public:
   }
 
   bool isXRegisterReserved(size_t i) const { return ReserveXRegister[i]; }
-  unsigned getNumXRegisterReserved() const { return ReserveXRegister.count(); }
+  bool isXRegisterReservedForRA(size_t i) const { return ReserveXRegisterForRA[i]; }
+  unsigned getNumXRegisterReserved() const {
+    BitVector AllReservedX(AArch64::GPR64commonRegClass.getNumRegs());
+    AllReservedX |= ReserveXRegister;
+    AllReservedX |= ReserveXRegisterForRA;
+    return AllReservedX.count();
+  }
   bool isXRegCustomCalleeSaved(size_t i) const {
     return CustomCallSavedXRegs[i];
   }
@@ -245,6 +257,7 @@ public:
   bool isTargetWindows() const { return TargetTriple.isOSWindows(); }
   bool isTargetAndroid() const { return TargetTriple.isAndroid(); }
   bool isTargetFuchsia() const { return TargetTriple.isOSFuchsia(); }
+  bool isWindowsArm64EC() const { return TargetTriple.isWindowsArm64EC(); }
 
   bool isTargetCOFF() const { return TargetTriple.isOSBinFormatCOFF(); }
   bool isTargetELF() const { return TargetTriple.isOSBinFormatELF(); }
@@ -286,6 +299,14 @@ public:
 
   unsigned classifyGlobalFunctionReference(const GlobalValue *GV,
                                            const TargetMachine &TM) const;
+
+  /// This function is design to compatible with the function def in other
+  /// targets and escape build error about the virtual function def in base
+  /// class TargetSubtargetInfo. Updeate me if AArch64 target need to use it.
+  unsigned char
+  classifyGlobalFunctionReference(const GlobalValue *GV) const override {
+    return 0;
+  }
 
   void overrideSchedPolicy(MachineSchedPolicy &Policy,
                            unsigned NumRegionInstrs) const override;
@@ -347,11 +368,29 @@ public:
   }
 
   bool useSVEForFixedLengthVectors() const {
+    if (forceStreamingCompatibleSVE())
+      return true;
+
     // Prefer NEON unless larger SVE registers are available.
     return hasSVE() && getMinSVEVectorSizeInBits() >= 256;
   }
 
+  bool forceStreamingCompatibleSVE() const;
+
   unsigned getVScaleForTuning() const { return VScaleForTuning; }
+
+  const char* getChkStkName() const {
+    if (isWindowsArm64EC())
+      return "__chkstk_arm64ec";
+    return "__chkstk";
+  }
+
+  const char* getSecurityCheckCookieName() const {
+    if (isWindowsArm64EC())
+      return "__security_check_cookie_arm64ec";
+    return "__security_check_cookie";
+  }
+
 };
 } // End llvm namespace
 

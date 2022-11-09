@@ -42,6 +42,11 @@ Non-comprehensive list of changes in this release
    functionality, or simply have a lot to talk about), see the `NOTE` below
    for adding a new subsection.
 
+*  The ``readnone`` calls which are crossing suspend points in coroutines will
+   not be merged. Since ``readnone`` calls may access thread id and thread id
+   is not a constant in coroutines. This decision may cause unnecessary
+   performance regressions and we plan to fix it in later versions.
+
 * ...
 
 Update on required toolchains to build LLVM
@@ -62,6 +67,11 @@ and there is no way to suppress this error.
 Changes to the LLVM IR
 ----------------------
 
+* The constant expression variants of the following instructions has been
+  removed:
+
+  * ``fneg``
+
 Changes to building LLVM
 ------------------------
 
@@ -76,6 +86,10 @@ Changes to the AMDGPU Backend
 
 Changes to the ARM Backend
 --------------------------
+
+* Support for targeting armv2, armv2A, armv3 and armv3M has been removed.
+  LLVM did not, and was not ever likely to generate correct code for those
+  architecture versions so their presence was misleading.
 
 Changes to the AVR Backend
 --------------------------
@@ -103,6 +117,9 @@ Changes to the PowerPC Backend
 Changes to the RISC-V Backend
 -----------------------------
 
+* Support for the unratified Zbe, Zbf, Zbm, Zbp, Zbr, and Zbt extensions have
+  been removed.
+
 Changes to the WebAssembly Backend
 ----------------------------------
 
@@ -125,6 +142,13 @@ Changes to the OCaml bindings
 
 Changes to the C API
 --------------------
+
+* The following functions for creating constant expressions have been removed,
+  because the underlying constant expressions are no longer supported. Instead,
+  an instruction should be created using the ``LLVMBuildXYZ`` APIs, which will
+  constant fold the operands if possible and create an instruction otherwise:
+
+  * ``LLVMConstFNeg``
 
 Changes to the Go bindings
 --------------------------

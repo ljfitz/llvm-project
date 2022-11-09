@@ -30,7 +30,6 @@
 #include "llvm/Support/Endian.h"
 #include <limits>
 #include <type_traits>
-#include <vector>
 
 namespace clang {
 namespace interp {
@@ -154,6 +153,106 @@ bool Mul(InterpState &S, CodePtr OpPC) {
   return AddSubMulHelper<T, T::mul, std::multiplies>(S, OpPC, Bits, LHS, RHS);
 }
 
+/// 1) Pops the RHS from the stack.
+/// 2) Pops the LHS from the stack.
+/// 3) Pushes 'LHS & RHS' on the stack
+template <PrimType Name, class T = typename PrimConv<Name>::T>
+bool BitAnd(InterpState &S, CodePtr OpPC) {
+  const T &RHS = S.Stk.pop<T>();
+  const T &LHS = S.Stk.pop<T>();
+
+  unsigned Bits = RHS.bitWidth();
+  T Result;
+  if (!T::bitAnd(LHS, RHS, Bits, &Result)) {
+    S.Stk.push<T>(Result);
+    return true;
+  }
+  return false;
+}
+
+/// 1) Pops the RHS from the stack.
+/// 2) Pops the LHS from the stack.
+/// 3) Pushes 'LHS | RHS' on the stack
+template <PrimType Name, class T = typename PrimConv<Name>::T>
+bool BitOr(InterpState &S, CodePtr OpPC) {
+  const T &RHS = S.Stk.pop<T>();
+  const T &LHS = S.Stk.pop<T>();
+
+  unsigned Bits = RHS.bitWidth();
+  T Result;
+  if (!T::bitOr(LHS, RHS, Bits, &Result)) {
+    S.Stk.push<T>(Result);
+    return true;
+  }
+  return false;
+}
+
+/// 1) Pops the RHS from the stack.
+/// 2) Pops the LHS from the stack.
+/// 3) Pushes 'LHS % RHS' on the stack (the remainder of dividing LHS by RHS).
+template <PrimType Name, class T = typename PrimConv<Name>::T>
+bool Rem(InterpState &S, CodePtr OpPC) {
+  const T &RHS = S.Stk.pop<T>();
+  const T &LHS = S.Stk.pop<T>();
+
+  if (RHS.isZero()) {
+    const SourceInfo &Loc = S.Current->getSource(OpPC);
+    S.FFDiag(Loc, diag::note_expr_divide_by_zero);
+    return false;
+  }
+
+  if (LHS.isSigned() && LHS.isMin() && RHS.isNegative() && RHS.isMinusOne()) {
+    APSInt LHSInt = LHS.toAPSInt();
+    SmallString<32> Trunc;
+    (-LHSInt.extend(LHSInt.getBitWidth() + 1)).toString(Trunc, 10);
+    const SourceInfo &Loc = S.Current->getSource(OpPC);
+    const Expr *E = S.Current->getExpr(OpPC);
+    S.CCEDiag(Loc, diag::note_constexpr_overflow) << Trunc << E->getType();
+    return false;
+  }
+
+  const unsigned Bits = RHS.bitWidth() * 2;
+  T Result;
+  if (!T::rem(LHS, RHS, Bits, &Result)) {
+    S.Stk.push<T>(Result);
+    return true;
+  }
+  return false;
+}
+
+/// 1) Pops the RHS from the stack.
+/// 2) Pops the LHS from the stack.
+/// 3) Pushes 'LHS / RHS' on the stack
+template <PrimType Name, class T = typename PrimConv<Name>::T>
+bool Div(InterpState &S, CodePtr OpPC) {
+  const T &RHS = S.Stk.pop<T>();
+  const T &LHS = S.Stk.pop<T>();
+
+  if (RHS.isZero()) {
+    const SourceInfo &Loc = S.Current->getSource(OpPC);
+    S.FFDiag(Loc, diag::note_expr_divide_by_zero);
+    return false;
+  }
+
+  if (LHS.isSigned() && LHS.isMin() && RHS.isNegative() && RHS.isMinusOne()) {
+    APSInt LHSInt = LHS.toAPSInt();
+    SmallString<32> Trunc;
+    (-LHSInt.extend(LHSInt.getBitWidth() + 1)).toString(Trunc, 10);
+    const SourceInfo &Loc = S.Current->getSource(OpPC);
+    const Expr *E = S.Current->getExpr(OpPC);
+    S.CCEDiag(Loc, diag::note_constexpr_overflow) << Trunc << E->getType();
+    return false;
+  }
+
+  const unsigned Bits = RHS.bitWidth() * 2;
+  T Result;
+  if (!T::div(LHS, RHS, Bits, &Result)) {
+    S.Stk.push<T>(Result);
+    return true;
+  }
+  return false;
+}
+
 //===----------------------------------------------------------------------===//
 // Inv
 //===----------------------------------------------------------------------===//
@@ -182,6 +281,20 @@ bool Neg(InterpState &S, CodePtr OpPC) {
 
   S.Stk.push<T>(Result);
   return true;
+}
+
+/// 1) Pops the value from the stack.
+/// 2) Pushes the bitwise complemented value on the stack (~V).
+template <PrimType Name, class T = typename PrimConv<Name>::T>
+bool Comp(InterpState &S, CodePtr OpPC) {
+  const T &Val = S.Stk.pop<T>();
+  T Result;
+  if (!T::comp(Val, &Result)) {
+    S.Stk.push<T>(Result);
+    return true;
+  }
+
+  return false;
 }
 
 //===----------------------------------------------------------------------===//
@@ -493,6 +606,9 @@ bool InitThisFieldActive(InterpState &S, CodePtr OpPC, uint32_t I) {
   return true;
 }
 
+/// 1) Pops the value from the stack
+/// 2) Pops a pointer from the stack
+/// 3) Pushes the value to field I of the pointer on the stack
 template <PrimType Name, class T = typename PrimConv<Name>::T>
 bool InitField(InterpState &S, CodePtr OpPC, uint32_t I) {
   const T &Value = S.Stk.pop<T>();
@@ -546,6 +662,8 @@ inline bool GetPtrGlobal(InterpState &S, CodePtr OpPC, uint32_t I) {
   return true;
 }
 
+/// 1) Pops a Pointer from the stack
+/// 2) Pushes Pointer.atField(Off) on the stack
 inline bool GetPtrField(InterpState &S, CodePtr OpPC, uint32_t Off) {
   const Pointer &Ptr = S.Stk.pop<Pointer>();
   if (!CheckNull(S, OpPC, Ptr, CSK_Field))
@@ -721,6 +839,9 @@ bool InitPop(InterpState &S, CodePtr OpPC) {
   return true;
 }
 
+/// 1) Pops the value from the stack
+/// 2) Peeks a pointer and gets its index \Idx
+/// 3) Sets the value on the pointer, leaving the pointer on the stack.
 template <PrimType Name, class T = typename PrimConv<Name>::T>
 bool InitElem(InterpState &S, CodePtr OpPC, uint32_t Idx) {
   const T &Value = S.Stk.pop<T>();
@@ -732,6 +853,7 @@ bool InitElem(InterpState &S, CodePtr OpPC, uint32_t Idx) {
   return true;
 }
 
+/// The same as InitElem, but pops the pointer as well.
 template <PrimType Name, class T = typename PrimConv<Name>::T>
 bool InitElemPop(InterpState &S, CodePtr OpPC, uint32_t Idx) {
   const T &Value = S.Stk.pop<T>();
@@ -784,18 +906,24 @@ template <class T, bool Add> bool OffsetHelper(InterpState &S, CodePtr OpPC) {
     return false;
   };
 
-  // If the new offset would be negative, bail out.
-  if (Add && Offset.isNegative() && (Offset.isMin() || -Offset > Index))
-    return InvalidOffset();
-  if (!Add && Offset.isPositive() && Index < Offset)
-    return InvalidOffset();
-
-  // If the new offset would be out of bounds, bail out.
   unsigned MaxOffset = MaxIndex - Ptr.getIndex();
-  if (Add && Offset.isPositive() && Offset > MaxOffset)
-    return InvalidOffset();
-  if (!Add && Offset.isNegative() && (Offset.isMin() || -Offset > MaxOffset))
-    return InvalidOffset();
+  if constexpr (Add) {
+    // If the new offset would be negative, bail out.
+    if (Offset.isNegative() && (Offset.isMin() || -Offset > Index))
+      return InvalidOffset();
+
+    // If the new offset would be out of bounds, bail out.
+    if (Offset.isPositive() && Offset > MaxOffset)
+      return InvalidOffset();
+  } else {
+    // If the new offset would be negative, bail out.
+    if (Offset.isPositive() && Index < Offset)
+      return InvalidOffset();
+
+    // If the new offset would be out of bounds, bail out.
+    if (Offset.isNegative() && (Offset.isMin() || -Offset > MaxOffset))
+      return InvalidOffset();
+  }
 
   // Offset is valid - compute it on unsigned.
   int64_t WideIndex = static_cast<int64_t>(Index);
@@ -984,17 +1112,13 @@ inline bool ExpandPtr(InterpState &S, CodePtr OpPC) {
 // Read opcode arguments
 //===----------------------------------------------------------------------===//
 
-template <typename T>
-inline std::enable_if_t<!std::is_pointer<T>::value, T> ReadArg(InterpState &S,
-                                                               CodePtr &OpPC) {
-  return OpPC.read<T>();
-}
-
-template <typename T>
-inline std::enable_if_t<std::is_pointer<T>::value, T> ReadArg(InterpState &S,
-                                                              CodePtr &OpPC) {
-  uint32_t ID = OpPC.read<uint32_t>();
-  return reinterpret_cast<T>(S.P.getNativePointer(ID));
+template <typename T> inline T ReadArg(InterpState &S, CodePtr &OpPC) {
+  if constexpr (std::is_pointer<T>::value) {
+    uint32_t ID = OpPC.read<uint32_t>();
+    return reinterpret_cast<T>(S.P.getNativePointer(ID));
+  } else {
+    return OpPC.read<T>();
+  }
 }
 
 /// Interpreter entry point.

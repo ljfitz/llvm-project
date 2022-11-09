@@ -511,7 +511,9 @@ static void genDeallocate(fir::FirOpBuilder &builder, mlir::Location loc,
                           const fir::MutableBoxValue &box,
                           ErrorManager &errorManager) {
   // Deallocate intrinsic types inline.
-  if (!box.isDerived() && !errorManager.hasStatSpec() && !useAllocateRuntime) {
+  if (!box.isDerived() && !box.isPolymorphic() &&
+      !box.isUnlimitedPolymorphic() && !errorManager.hasStatSpec() &&
+      !useAllocateRuntime) {
     fir::factory::genInlinedDeallocate(builder, loc, box);
     return;
   }
@@ -521,6 +523,17 @@ static void genDeallocate(fir::FirOpBuilder &builder, mlir::Location loc,
   mlir::Value stat = genRuntimeDeallocate(builder, loc, box, errorManager);
   fir::factory::syncMutableBoxFromIRBox(builder, loc, box);
   errorManager.assignStat(builder, loc, stat);
+}
+
+void Fortran::lower::genDeallocateBox(
+    Fortran::lower::AbstractConverter &converter,
+    const fir::MutableBoxValue &box, mlir::Location loc) {
+  const Fortran::lower::SomeExpr *statExpr = nullptr;
+  const Fortran::lower::SomeExpr *errMsgExpr = nullptr;
+  ErrorManager errorManager;
+  errorManager.init(converter, loc, statExpr, errMsgExpr);
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+  genDeallocate(builder, loc, box, errorManager);
 }
 
 void Fortran::lower::genDeallocateStmt(
@@ -711,4 +724,37 @@ bool Fortran::lower::isWholePointer(const Fortran::lower::SomeExpr &expr) {
           Fortran::evaluate::UnwrapWholeSymbolOrComponentDataRef(expr))
     return Fortran::semantics::IsPointer(*sym);
   return false;
+}
+
+mlir::Value Fortran::lower::getAssumedCharAllocatableOrPointerLen(
+    fir::FirOpBuilder &builder, mlir::Location loc,
+    const Fortran::semantics::Symbol &sym, mlir::Value box) {
+  // Read length from fir.box (explicit expr cannot safely be re-evaluated
+  // here).
+  auto readLength = [&]() {
+    fir::BoxValue boxLoad =
+        builder.create<fir::LoadOp>(loc, fir::getBase(box)).getResult();
+    return fir::factory::readCharLen(builder, loc, boxLoad);
+  };
+  if (Fortran::semantics::IsOptional(sym)) {
+    mlir::IndexType idxTy = builder.getIndexType();
+    // It is not safe to unconditionally read boxes of optionals in case
+    // they are absents. According to 15.5.2.12 3 (9), it is illegal to
+    // inquire the length of absent optional, even if non deferred, so
+    // it's fine to use undefOp in this case.
+    auto isPresent = builder.create<fir::IsPresentOp>(loc, builder.getI1Type(),
+                                                      fir::getBase(box));
+    mlir::Value len =
+        builder.genIfOp(loc, {idxTy}, isPresent, true)
+            .genThen(
+                [&]() { builder.create<fir::ResultOp>(loc, readLength()); })
+            .genElse([&]() {
+              auto undef = builder.create<fir::UndefOp>(loc, idxTy);
+              builder.create<fir::ResultOp>(loc, undef.getResult());
+            })
+            .getResults()[0];
+    return len;
+  }
+
+  return readLength();
 }

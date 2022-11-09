@@ -134,6 +134,7 @@ struct AssemblerInvocation {
   unsigned NoExecStack : 1;
   unsigned FatalWarnings : 1;
   unsigned NoWarn : 1;
+  unsigned NoTypeCheck : 1;
   unsigned IncrementalLinkerCompatible : 1;
   unsigned EmbedBitcode : 1;
 
@@ -150,6 +151,10 @@ struct AssemblerInvocation {
   /// Darwin target variant triple, the variant of the deployment target
   /// for which the code is being compiled.
   llvm::Optional<llvm::Triple> DarwinTargetVariantTriple;
+
+  /// The version of the darwin target variant SDK which was used during the
+  /// compilation
+  llvm::VersionTuple DarwinTargetVariantSDKVersion;
   /// @}
 
 public:
@@ -166,6 +171,7 @@ public:
     NoExecStack = 0;
     FatalWarnings = 0;
     NoWarn = 0;
+    NoTypeCheck = 0;
     IncrementalLinkerCompatible = 0;
     Dwarf64 = 0;
     DwarfVersion = 0;
@@ -218,6 +224,14 @@ bool AssemblerInvocation::CreateFromArgs(AssemblerInvocation &Opts,
   Opts.Triple = llvm::Triple::normalize(Args.getLastArgValue(OPT_triple));
   if (Arg *A = Args.getLastArg(options::OPT_darwin_target_variant_triple))
     Opts.DarwinTargetVariantTriple = llvm::Triple(A->getValue());
+  if (Arg *A = Args.getLastArg(OPT_darwin_target_variant_sdk_version_EQ)) {
+    VersionTuple Version;
+    if (Version.tryParse(A->getValue()))
+      Diags.Report(diag::err_drv_invalid_value)
+          << A->getAsString(Args) << A->getValue();
+    else
+      Opts.DarwinTargetVariantSDKVersion = Version;
+  }
 
   Opts.CPU = std::string(Args.getLastArgValue(OPT_target_cpu));
   Opts.Features = Args.getAllArgValues(OPT_target_feature);
@@ -237,7 +251,8 @@ bool AssemblerInvocation::CreateFromArgs(AssemblerInvocation &Opts,
     Opts.CompressDebugSections =
         llvm::StringSwitch<llvm::DebugCompressionType>(A->getValue())
             .Case("none", llvm::DebugCompressionType::None)
-            .Case("zlib", llvm::DebugCompressionType::Z)
+            .Case("zlib", llvm::DebugCompressionType::Zlib)
+            .Case("zstd", llvm::DebugCompressionType::Zstd)
             .Default(llvm::DebugCompressionType::None);
   }
 
@@ -304,6 +319,7 @@ bool AssemblerInvocation::CreateFromArgs(AssemblerInvocation &Opts,
   Opts.NoExecStack = Args.hasArg(OPT_mno_exec_stack);
   Opts.FatalWarnings = Args.hasArg(OPT_massembler_fatal_warnings);
   Opts.NoWarn = Args.hasArg(OPT_massembler_no_warn);
+  Opts.NoTypeCheck = Args.hasArg(OPT_mno_type_check);
   Opts.RelocationModel =
       std::string(Args.getLastArgValue(OPT_mrelocation_model, "pic"));
   Opts.TargetABI = std::string(Args.getLastArgValue(OPT_target_abi));
@@ -429,6 +445,8 @@ static bool ExecuteAssemblerImpl(AssemblerInvocation &Opts,
       TheTarget->createMCObjectFileInfo(Ctx, PIC));
   if (Opts.DarwinTargetVariantTriple)
     MOFI->setDarwinTargetVariantTriple(*Opts.DarwinTargetVariantTriple);
+  if (!Opts.DarwinTargetVariantSDKVersion.empty())
+    MOFI->setDarwinTargetVariantSDKVersion(Opts.DarwinTargetVariantSDKVersion);
   Ctx.setObjectFileInfo(MOFI.get());
 
   if (Opts.SaveTemporaryLabels)
@@ -468,6 +486,7 @@ static bool ExecuteAssemblerImpl(AssemblerInvocation &Opts,
 
   MCOptions.MCNoWarn = Opts.NoWarn;
   MCOptions.MCFatalWarnings = Opts.FatalWarnings;
+  MCOptions.MCNoTypeCheck = Opts.NoTypeCheck;
   MCOptions.ABIName = Opts.TargetABI;
 
   // FIXME: There is a bit of code duplication with addPassesToEmitFile.

@@ -20,18 +20,15 @@
 // this entire block, as it is not necessary for swig processing.
 #define LLDB_MARK_AS_BITMASK_ENUM(Enum)                                        \
   constexpr Enum operator|(Enum a, Enum b) {                                   \
-    return static_cast<Enum>(                                                  \
-        static_cast<std::underlying_type<Enum>::type>(a) |                     \
-        static_cast<std::underlying_type<Enum>::type>(b));                     \
+    return static_cast<Enum>(static_cast<std::underlying_type_t<Enum>>(a) |    \
+                             static_cast<std::underlying_type_t<Enum>>(b));    \
   }                                                                            \
   constexpr Enum operator&(Enum a, Enum b) {                                   \
-    return static_cast<Enum>(                                                  \
-        static_cast<std::underlying_type<Enum>::type>(a) &                     \
-        static_cast<std::underlying_type<Enum>::type>(b));                     \
+    return static_cast<Enum>(static_cast<std::underlying_type_t<Enum>>(a) &    \
+                             static_cast<std::underlying_type_t<Enum>>(b));    \
   }                                                                            \
   constexpr Enum operator~(Enum a) {                                           \
-    return static_cast<Enum>(                                                  \
-        ~static_cast<std::underlying_type<Enum>::type>(a));                    \
+    return static_cast<Enum>(~static_cast<std::underlying_type_t<Enum>>(a));   \
   }                                                                            \
   inline Enum &operator|=(Enum &a, Enum b) {                                   \
     a = a | b;                                                                 \
@@ -608,8 +605,6 @@ enum CommandArgumentType {
   eArgTypeConnectURL,
   eArgTypeTargetID,
   eArgTypeStopHookID,
-  eArgTypeReproducerProvider,
-  eArgTypeReproducerSignal,
   eArgTypeLastArg // Always keep this entry as the last entry in this
                   // enumeration!!
 };
@@ -830,6 +825,15 @@ enum TemplateArgumentKind {
   eTemplateArgumentKindExpression,
   eTemplateArgumentKindPack,
   eTemplateArgumentKindNullPtr,
+};
+
+/// Type of match to be performed when looking for a formatter for a data type.
+/// Used by classes like SBTypeNameSpecifier or lldb_private::TypeMatcher.
+enum FormatterMatchType {
+  eFormatterMatchExact,
+  eFormatterMatchRegex,
+
+  eLastFormatterMatchType = eFormatterMatchRegex,
 };
 
 /// Options that can be set for a formatter to alter its behavior. Not
