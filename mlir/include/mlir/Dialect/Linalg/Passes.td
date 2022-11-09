@@ -114,7 +114,7 @@ def LinalgUnfuse : Pass<"linalg-unfuse", "func::FuncOp"> {
   let dependentDialects = [
     "linalg::LinalgDialect",
     "tensor::TensorDialect",
-    "arith::ArithmeticDialect",
+    "arith::ArithDialect",
     "math::MathDialect"
   ];
 }
@@ -125,7 +125,7 @@ def LinalgStructuralFusion : Pass<"linalg-structural-fusion", "func::FuncOp"> {
   let dependentDialects = [
     "linalg::LinalgDialect",
     "tensor::TensorDialect",
-    "arith::ArithmeticDialect"
+    "arith::ArithDialect"
   ];
   let options = [
     ListOption<"strategyString", "strategy", "std::string",

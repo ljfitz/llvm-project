@@ -88,7 +88,7 @@ def Linalg_IndexOp : Linalg_Op<"index", [Pure]>,
   let hasVerifier = 1;
 }
 
-def Linalg_SoftmaxOp : Linalg_Op<"softmax", [NoSideEffect]> {
+def Linalg_SoftmaxOp : Linalg_Op<"softmax", [Pure]> {
   let arguments = (ins AnyTensor:$input,
                        I64Attr:$dim);
   let results = (outs AnyTensor:$result);
@@ -100,7 +100,7 @@ def Linalg_SoftmaxOp : Linalg_Op<"softmax", [NoSideEffect]> {
   let hasVerifier = 1;
 }
 
-def Linalg_GlobalAveragePool2DOp : Linalg_Op<"globalaveragepool2d", [NoSideEffect]> {
+def Linalg_GlobalAveragePool2DOp : Linalg_Op<"globalaveragepool2d", [Pure]> {
   let arguments = (ins AnyTensor:$input);
   let results = (outs AnyTensor:$result);
   let summary = "linalg globalaveragepool2d operation";
@@ -173,15 +173,15 @@ def Linalg_SubgraphOp
 
     BlockAndValueMapping getCaptureMapping() {
       BlockAndValueMapping result;
-      for (unsigned idx = 0; idx < captures().size(); ++idx) {
-        result.map(captures()[idx], getCaptureArgs()[idx]);
+      for (unsigned idx = 0; idx < getCaptures().size(); ++idx) {
+        result.map(getCaptures()[idx], getCaptureArgs()[idx]);
       }
       return result;
     }
     BlockAndValueMapping getUnCaptureMapping() {
       BlockAndValueMapping result;
-      for (unsigned idx = 0; idx < captures().size(); ++idx) {
-        result.map(getCaptureArgs()[idx], captures()[idx]);
+      for (unsigned idx = 0; idx < getCaptures().size(); ++idx) {
+        result.map(getCaptureArgs()[idx], getCaptures()[idx]);
       }
       return result;
     }
