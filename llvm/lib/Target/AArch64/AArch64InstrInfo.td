@@ -142,6 +142,8 @@ def HasSMEF64        : Predicate<"Subtarget->hasSMEF64()">,
                                  AssemblerPredicateWithAll<(all_of FeatureSMEF64), "sme-f64">;
 def HasSMEI64        : Predicate<"Subtarget->hasSMEI64()">,
                                  AssemblerPredicateWithAll<(all_of FeatureSMEI64), "sme-i64">;
+def HasSME2          : Predicate<"Subtarget->hasSME2()">,
+                                 AssemblerPredicate<(all_of FeatureSME2), "sme2">;
 // A subset of SVE(2) instructions are legal in Streaming SVE execution mode,
 // they should be enabled if either has been specified.
 def HasSVEorSME
@@ -217,6 +219,8 @@ def UseNegativeImmediates
                                              "NegativeImmediates">;
 
 def UseScalarIncVL : Predicate<"Subtarget->useScalarIncVL()">;
+
+def NotInStreamingSVEMode  : Predicate<"!Subtarget->forceStreamingCompatibleSVE()">;
 
 def AArch64LocalRecover : SDNode<"ISD::LOCAL_RECOVER",
                                   SDTypeProfile<1, 1, [SDTCisSameAs<0, 1>,
@@ -1450,6 +1454,12 @@ def : Pat<(AArch64mrs imm:$id),
 def MOVbaseTLS : Pseudo<(outs GPR64:$dst), (ins),
                        [(set GPR64:$dst, AArch64threadpointer)]>, Sched<[WriteSys]>;
 
+// This gets lowered into a 24-byte instruction sequence
+let Defs = [ X9, X16, X17, NZCV ], Size = 24 in {
+def KCFI_CHECK : Pseudo<
+  (outs), (ins GPR64:$ptr, i32imm:$type), []>, Sched<[]>;
+}
+
 let Uses = [ X9 ], Defs = [ X16, X17, LR, NZCV ] in {
 def HWASAN_CHECK_MEMACCESS : Pseudo<
   (outs), (ins GPR64noip:$ptr, i32imm:$accessinfo),
@@ -2092,7 +2102,7 @@ defm BICS : LogicalRegS<0b11, 1, "bics",
                         BinOpFrag<(AArch64and_flag node:$LHS, (not node:$RHS))>>;
 defm AND  : LogicalReg<0b00, 0, "and", and>;
 defm BIC  : LogicalReg<0b00, 1, "bic",
-                       BinOpFrag<(and node:$LHS, (not node:$RHS))>>;
+                       BinOpFrag<(and node:$LHS, (not node:$RHS))>, 3>;
 defm EON  : LogicalReg<0b10, 1, "eon",
                        BinOpFrag<(not (xor node:$LHS, node:$RHS))>>;
 defm EOR  : LogicalReg<0b10, 0, "eor", xor>;
@@ -4249,6 +4259,7 @@ let isPseudo = 1 in {
   def SEH_PrologEnd : Pseudo<(outs), (ins), []>, Sched<[]>;
   def SEH_EpilogStart : Pseudo<(outs), (ins), []>, Sched<[]>;
   def SEH_EpilogEnd : Pseudo<(outs), (ins), []>, Sched<[]>;
+  def SEH_PACSignLR : Pseudo<(outs), (ins), []>, Sched<[]>;
 }
 
 // Pseudo instructions for Windows EH
@@ -5879,6 +5890,23 @@ defm : Neon_INS_elt_pattern<v8bf16, v4bf16, bf16, INSvi16lane>;
 defm : Neon_INS_elt_pattern<v4f32, v2f32, f32, INSvi32lane>;
 defm : Neon_INS_elt_pattern<v2f64, v1f64, f64, INSvi64lane>;
 
+// Insert from bitcast
+// vector_insert(bitcast(f32 src), n, lane) -> INSvi32lane(src, lane, INSERT_SUBREG(-, n), 0)
+def : Pat<(v4i32 (vector_insert v4i32:$src, (i32 (bitconvert (f32 FPR32:$Sn))), imm:$Immd)),
+          (INSvi32lane V128:$src, imm:$Immd, (INSERT_SUBREG (IMPLICIT_DEF), FPR32:$Sn, ssub), 0)>;
+def : Pat<(v2i64 (vector_insert v2i64:$src, (i64 (bitconvert (f64 FPR64:$Sn))), imm:$Immd)),
+          (INSvi64lane V128:$src, imm:$Immd, (INSERT_SUBREG (IMPLICIT_DEF), FPR64:$Sn, dsub), 0)>;
+
+// bitcast of an extract
+// f32 bitcast(vector_extract(v4i32 src, lane)) -> EXTRACT_SUBREG(INSvi32lane(-, 0, src, lane))
+def : Pat<(f32 (bitconvert (i32 (vector_extract v4i32:$src, imm:$Immd)))),
+          (EXTRACT_SUBREG (INSvi32lane (IMPLICIT_DEF), 0, V128:$src, imm:$Immd), ssub)>;
+def : Pat<(f32 (bitconvert (i32 (vector_extract v4i32:$src, 0)))),
+          (EXTRACT_SUBREG V128:$src, ssub)>;
+def : Pat<(f64 (bitconvert (i64 (vector_extract v2i64:$src, imm:$Immd)))),
+          (EXTRACT_SUBREG (INSvi64lane (IMPLICIT_DEF), 0, V128:$src, imm:$Immd), dsub)>;
+def : Pat<(f64 (bitconvert (i64 (vector_extract v2i64:$src, 0)))),
+          (EXTRACT_SUBREG V128:$src, dsub)>;
 
 // Floating point vector extractions are codegen'd as either a sequence of
 // subregister extractions, or a MOV (aka DUP here) if
@@ -7106,16 +7134,17 @@ def : Ld1Lane128IdxOpPat<extloadi8, VectorIndexH, v8i16, i32, LD1i8, VectorIndex
 
 // Same as above, but the first element is populated using
 // scalar_to_vector + insert_subvector instead of insert_vector_elt.
-class Ld1Lane128FirstElm<ValueType ResultTy, ValueType VecTy,
-                        SDPatternOperator ExtLoad, Instruction LD1>
-  : Pat<(ResultTy (scalar_to_vector (i32 (ExtLoad GPR64sp:$Rn)))),
-          (ResultTy (EXTRACT_SUBREG
-            (LD1 (VecTy (IMPLICIT_DEF)), 0, GPR64sp:$Rn), dsub))>;
+let Predicates = [NotInStreamingSVEMode] in {
+  class Ld1Lane128FirstElm<ValueType ResultTy, ValueType VecTy,
+                          SDPatternOperator ExtLoad, Instruction LD1>
+    : Pat<(ResultTy (scalar_to_vector (i32 (ExtLoad GPR64sp:$Rn)))),
+            (ResultTy (EXTRACT_SUBREG
+              (LD1 (VecTy (IMPLICIT_DEF)), 0, GPR64sp:$Rn), dsub))>;
 
-def : Ld1Lane128FirstElm<v2i32, v8i16, extloadi16, LD1i16>;
-def : Ld1Lane128FirstElm<v2i32, v16i8, extloadi8, LD1i8>;
-def : Ld1Lane128FirstElm<v4i16, v16i8, extloadi8, LD1i8>;
-
+  def : Ld1Lane128FirstElm<v2i32, v8i16, extloadi16, LD1i16>;
+  def : Ld1Lane128FirstElm<v2i32, v16i8, extloadi8, LD1i8>;
+  def : Ld1Lane128FirstElm<v4i16, v16i8, extloadi8, LD1i8>;
+}
 class Ld1Lane64Pat<SDPatternOperator scalar_load, Operand VecIndex,
                    ValueType VTy, ValueType STy, Instruction LD1>
   : Pat<(vector_insert (VTy VecListOne64:$Rd),
@@ -7341,6 +7370,11 @@ def : Pat<(shl (sext_inreg GPR64:$Rn, i16), (i64 imm0_63:$imm)),
 
 def : Pat<(shl (i64 (sext GPR32:$Rn)), (i64 imm0_63:$imm)),
           (SBFMXri (INSERT_SUBREG (i64 (IMPLICIT_DEF)), GPR32:$Rn, sub_32),
+                   (i64 (i64shift_a        imm0_63:$imm)),
+                   (i64 (i64shift_sext_i32 imm0_63:$imm)))>;
+
+def : Pat<(shl (i64 (zext GPR32:$Rn)), (i64 imm0_63:$imm)),
+          (UBFMXri (INSERT_SUBREG (i64 (IMPLICIT_DEF)), GPR32:$Rn, sub_32),
                    (i64 (i64shift_a        imm0_63:$imm)),
                    (i64 (i64shift_sext_i32 imm0_63:$imm)))>;
 

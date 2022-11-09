@@ -108,6 +108,12 @@ public:
     UNW_Libgcc
   };
 
+  enum class UnwindTableLevel {
+    None,
+    Synchronous,
+    Asynchronous,
+  };
+
   enum RTTIMode {
     RM_Enabled,
     RM_Disabled,
@@ -150,7 +156,6 @@ private:
   mutable std::unique_ptr<Tool> StaticLibTool;
   mutable std::unique_ptr<Tool> IfsMerge;
   mutable std::unique_ptr<Tool> OffloadBundler;
-  mutable std::unique_ptr<Tool> OffloadWrapper;
   mutable std::unique_ptr<Tool> OffloadPackager;
   mutable std::unique_ptr<Tool> LinkerWrapper;
 
@@ -162,7 +167,6 @@ private:
   Tool *getIfsMerge() const;
   Tool *getClangAs() const;
   Tool *getOffloadBundler() const;
-  Tool *getOffloadWrapper() const;
   Tool *getOffloadPackager() const;
   Tool *getLinkerWrapper() const;
 
@@ -258,6 +262,10 @@ public:
   const llvm::Triple &getEffectiveTriple() const {
     assert(!EffectiveTriple.getTriple().empty() && "No effective triple");
     return EffectiveTriple;
+  }
+
+  bool hasEffectiveTriple() const {
+    return !EffectiveTriple.getTriple().empty();
   }
 
   path_list &getLibraryPaths() { return LibraryPaths; }
@@ -493,9 +501,9 @@ public:
   /// Returns true if gcov instrumentation (-fprofile-arcs or --coverage) is on.
   static bool needsGCovInstrumentation(const llvm::opt::ArgList &Args);
 
-  /// IsUnwindTablesDefault - Does this tool chain use -funwind-tables
-  /// by default.
-  virtual bool IsUnwindTablesDefault(const llvm::opt::ArgList &Args) const;
+  /// How detailed should the unwind tables be by default.
+  virtual UnwindTableLevel
+  getDefaultUnwindTableLevel(const llvm::opt::ArgList &Args) const;
 
   /// Test whether this toolchain supports outline atomics by default.
   virtual bool
@@ -629,6 +637,11 @@ public:
                                      llvm::opt::ArgStringList &CC1Args,
                                      Action::OffloadKind DeviceOffloadKind) const;
 
+  /// Add options that need to be passed to cc1as for this target.
+  virtual void
+  addClangCC1ASTargetOptions(const llvm::opt::ArgList &Args,
+                             llvm::opt::ArgStringList &CC1ASArgs) const;
+
   /// Add warning options that need to be passed to cc1 for this target.
   virtual void addClangWarningOptions(llvm::opt::ArgStringList &CC1Args) const;
 
@@ -712,9 +725,9 @@ public:
   virtual VersionTuple computeMSVCVersion(const Driver *D,
                                           const llvm::opt::ArgList &Args) const;
 
-  /// Get paths of HIP device libraries.
+  /// Get paths for device libraries.
   virtual llvm::SmallVector<BitCodeLibraryInfo, 12>
-  getHIPDeviceLibs(const llvm::opt::ArgList &Args) const;
+  getDeviceLibs(const llvm::opt::ArgList &Args) const;
 
   /// Add the system specific linker arguments to use
   /// for the given HIP runtime library type.
@@ -740,10 +753,6 @@ public:
       const llvm::opt::ArgList &DriverArgs, const JobAction &JA,
       const llvm::fltSemantics *FPType = nullptr) const {
     return llvm::DenormalMode::getIEEE();
-  }
-
-  virtual Optional<llvm::Triple> getTargetVariantTriple() const {
-    return llvm::None;
   }
 
   // We want to expand the shortened versions of the triples passed in to

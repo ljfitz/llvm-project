@@ -22,8 +22,9 @@
 #include <__functional/operations.h>
 #include <__functional/ranges_operations.h>
 #include <__iterator/iterator_traits.h>
+#include <__memory/destruct_n.h>
+#include <__memory/unique_ptr.h>
 #include <climits>
-#include <memory>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
@@ -173,7 +174,7 @@ _LIBCPP_HIDDEN unsigned __sort5(_ForwardIterator __x1, _ForwardIterator __x2, _F
 }
 
 template <class _AlgPolicy, class _Compare, class _ForwardIterator>
-_LIBCPP_HIDDEN unsigned __sort5_wrap_policy(
+_LIBCPP_HIDE_FROM_ABI unsigned __sort5_wrap_policy(
     _ForwardIterator __x1, _ForwardIterator __x2, _ForwardIterator __x3, _ForwardIterator __x4, _ForwardIterator __x5,
     _Compare __c) {
   using _WrappedComp = typename _WrapAlgPolicy<_AlgPolicy, _Compare>::type;
@@ -233,8 +234,8 @@ template <class, class _Compare, class _RandomAccessIterator>
 inline _LIBCPP_HIDE_FROM_ABI __enable_if_t<__use_branchless_sort<_Compare, _RandomAccessIterator>::value, void>
 __sort3_maybe_branchless(_RandomAccessIterator __x1, _RandomAccessIterator __x2, _RandomAccessIterator __x3,
                          _Compare __c) {
-  _VSTD::__cond_swap<_Compare>(__x2, __x3, __c);
-  _VSTD::__partially_sorted_swap<_Compare>(__x1, __x2, __x3, __c);
+  std::__cond_swap<_Compare>(__x2, __x3, __c);
+  std::__partially_sorted_swap<_Compare>(__x1, __x2, __x3, __c);
 }
 
 template <class _AlgPolicy, class _Compare, class _RandomAccessIterator>
@@ -248,11 +249,11 @@ template <class, class _Compare, class _RandomAccessIterator>
 inline _LIBCPP_HIDE_FROM_ABI __enable_if_t<__use_branchless_sort<_Compare, _RandomAccessIterator>::value, void>
 __sort4_maybe_branchless(_RandomAccessIterator __x1, _RandomAccessIterator __x2, _RandomAccessIterator __x3,
                          _RandomAccessIterator __x4, _Compare __c) {
-  _VSTD::__cond_swap<_Compare>(__x1, __x3, __c);
-  _VSTD::__cond_swap<_Compare>(__x2, __x4, __c);
-  _VSTD::__cond_swap<_Compare>(__x1, __x2, __c);
-  _VSTD::__cond_swap<_Compare>(__x3, __x4, __c);
-  _VSTD::__cond_swap<_Compare>(__x2, __x3, __c);
+  std::__cond_swap<_Compare>(__x1, __x3, __c);
+  std::__cond_swap<_Compare>(__x2, __x4, __c);
+  std::__cond_swap<_Compare>(__x1, __x2, __c);
+  std::__cond_swap<_Compare>(__x3, __x4, __c);
+  std::__cond_swap<_Compare>(__x2, __x3, __c);
 }
 
 template <class _AlgPolicy, class _Compare, class _RandomAccessIterator>
@@ -266,12 +267,12 @@ template <class, class _Compare, class _RandomAccessIterator>
 inline _LIBCPP_HIDE_FROM_ABI __enable_if_t<__use_branchless_sort<_Compare, _RandomAccessIterator>::value, void>
 __sort5_maybe_branchless(_RandomAccessIterator __x1, _RandomAccessIterator __x2, _RandomAccessIterator __x3,
                          _RandomAccessIterator __x4, _RandomAccessIterator __x5, _Compare __c) {
-  _VSTD::__cond_swap<_Compare>(__x1, __x2, __c);
-  _VSTD::__cond_swap<_Compare>(__x4, __x5, __c);
-  _VSTD::__partially_sorted_swap<_Compare>(__x3, __x4, __x5, __c);
-  _VSTD::__cond_swap<_Compare>(__x2, __x5, __c);
-  _VSTD::__partially_sorted_swap<_Compare>(__x1, __x3, __x4, __c);
-  _VSTD::__partially_sorted_swap<_Compare>(__x2, __x3, __x4, __c);
+  std::__cond_swap<_Compare>(__x1, __x2, __c);
+  std::__cond_swap<_Compare>(__x4, __x5, __c);
+  std::__partially_sorted_swap<_Compare>(__x3, __x4, __x5, __c);
+  std::__cond_swap<_Compare>(__x2, __x5, __c);
+  std::__partially_sorted_swap<_Compare>(__x1, __x3, __x4, __c);
+  std::__partially_sorted_swap<_Compare>(__x2, __x3, __x4, __c);
 }
 
 template <class _AlgPolicy, class _Compare, class _RandomAccessIterator>
@@ -307,7 +308,7 @@ void __insertion_sort(_BidirectionalIterator __first, _BidirectionalIterator __l
       value_type __t(_Ops::__iter_move(__j));
       for (_BidirectionalIterator __k = __i; __k != __first && __comp(__t, *--__k); --__j)
         *__j = _Ops::__iter_move(__k);
-      *__j = _VSTD::move(__t);
+      *__j = std::move(__t);
     }
   }
 }
@@ -330,7 +331,7 @@ void __insertion_sort_3(_RandomAccessIterator __first, _RandomAccessIterator __l
         *__j = _Ops::__iter_move(__k);
         __j = __k;
       } while (__j != __first && __comp(__t, *--__k));
-      *__j = _VSTD::move(__t);
+      *__j = std::move(__t);
     }
     __j = __i;
   }
@@ -382,7 +383,7 @@ _LIBCPP_HIDDEN bool __insertion_sort_incomplete(
         *__j = _Ops::__iter_move(__k);
         __j = __k;
       } while (__j != __first && __comp(__t, *--__k));
-      *__j = _VSTD::move(__t);
+      *__j = std::move(__t);
       if (++__count == __limit)
         return ++__i == __last;
     }
@@ -532,7 +533,7 @@ void __introsort(_RandomAccessIterator __first, _RandomAccessIterator __last, _C
           }
           // [__first, __i) == *__first and *__first < [__i, __last)
           // The first part is sorted, sort the second part
-          // _VSTD::__sort<_Compare>(__i, __last, __comp);
+          // std::__sort<_Compare>(__i, __last, __comp);
           __first = __i;
           goto __restart;
         }
@@ -682,7 +683,7 @@ inline _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX20
 void __sort_impl(_RandomAccessIterator __first, _RandomAccessIterator __last, _Comp& __comp) {
   std::__debug_randomize_range<_AlgPolicy>(__first, __last);
 
-  using _Comp_ref = typename __comp_ref_type<_Comp>::type;
+  using _Comp_ref = __comp_ref_type<_Comp>;
   if (__libcpp_is_constant_evaluated()) {
     std::__partial_sort<_AlgPolicy>(__first, __last, __last, __comp);
 

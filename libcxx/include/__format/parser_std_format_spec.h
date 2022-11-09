@@ -54,8 +54,7 @@ __parse_arg_id(const _CharT* __begin, const _CharT* __end, auto& __parse_ctx) {
   if (__begin == __end)
     __throw_format_error("End of input while parsing format-spec arg-id");
 
-  __format::__parse_number_result __r =
-      __format::__parse_arg_id(__begin, __end, __parse_ctx);
+  __format::__parse_number_result __r = __format::__parse_arg_id(__begin, __end, __parse_ctx);
 
   if (__r.__ptr == __end || *__r.__ptr != _CharT('}'))
     __throw_format_error("Invalid arg-id");
@@ -176,6 +175,7 @@ struct __std {
 
 struct __chrono {
   __alignment __alignment_ : 3;
+  bool __locale_specific_form_ : 1;
   bool __weekday_name_ : 1;
   bool __month_name_ : 1;
 };
@@ -288,12 +288,22 @@ public:
   _LIBCPP_HIDE_FROM_ABI
   __parsed_specifications<_CharT> __get_parsed_std_specifications(auto& __ctx) const {
     return __parsed_specifications<_CharT>{
-        .__std_ =
-            __std{.__alignment_            = __alignment_,
-                  .__sign_                 = __sign_,
-                  .__alternate_form_       = __alternate_form_,
-                  .__locale_specific_form_ = __locale_specific_form_,
-                  .__type_                 = __type_},
+        .__std_ = __std{.__alignment_            = __alignment_,
+                        .__sign_                 = __sign_,
+                        .__alternate_form_       = __alternate_form_,
+                        .__locale_specific_form_ = __locale_specific_form_,
+                        .__type_                 = __type_},
+        .__width_{__get_width(__ctx)},
+        .__precision_{__get_precision(__ctx)},
+        .__fill_{__fill_}};
+  }
+
+  _LIBCPP_HIDE_FROM_ABI __parsed_specifications<_CharT> __get_parsed_chrono_specifications(auto& __ctx) const {
+    return __parsed_specifications<_CharT>{
+        .__chrono_ = __chrono{.__alignment_            = __alignment_,
+                              .__locale_specific_form_ = __locale_specific_form_,
+                              .__weekday_name_         = __weekday_name_,
+                              .__month_name_           = __month_name_},
         .__width_{__get_width(__ctx)},
         .__precision_{__get_precision(__ctx)},
         .__fill_{__fill_}};
@@ -534,10 +544,7 @@ private:
     if (!__width_as_arg_)
       return __width_;
 
-    int32_t __result = __format_spec::__substitute_arg_id(__ctx.arg(__width_));
-    if (__result == 0)
-      __throw_format_error("A format-spec width field replacement should have a positive value");
-    return __result;
+    return __format_spec::__substitute_arg_id(__ctx.arg(__width_));
   }
 
   _LIBCPP_HIDE_FROM_ABI
@@ -653,11 +660,6 @@ template <class _CharT>
 _LIBCPP_HIDE_FROM_ABI constexpr void __process_parsed_floating_point(__parser<_CharT>& __parser) {
   switch (__parser.__type_) {
   case __format_spec::__type::__default:
-    // When no precision specified then it keeps default since that
-    // formatting differs from the other types.
-    if (__parser.__precision_as_arg_ || __parser.__precision_ != -1)
-      __parser.__type_ = __format_spec::__type::__general_lower_case;
-    break;
   case __format_spec::__type::__hexfloat_lower_case:
   case __format_spec::__type::__hexfloat_upper_case:
     // Precision specific behavior will be handled later.
@@ -698,6 +700,9 @@ struct __column_width_result {
   /// This limits the original output to fit in the wanted number of columns.
   const _CharT* __last_;
 };
+
+template <class _CharT>
+__column_width_result(size_t, const _CharT*) -> __column_width_result<_CharT>;
 
 /// Since a column width can be two it's possible that the requested column
 /// width can't be achieved. Depending on the intended usage the policy can be

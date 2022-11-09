@@ -387,6 +387,10 @@ void Preprocessor::RegisterBuiltinMacros() {
   Ident__is_target_os     = RegisterBuiltinMacro(*this, "__is_target_os");
   Ident__is_target_environment =
       RegisterBuiltinMacro(*this, "__is_target_environment");
+  Ident__is_target_variant_os =
+      RegisterBuiltinMacro(*this, "__is_target_variant_os");
+  Ident__is_target_variant_environment =
+      RegisterBuiltinMacro(*this, "__is_target_variant_environment");
 
   // Modules.
   Ident__building_module  = RegisterBuiltinMacro(*this, "__building_module");
@@ -1081,8 +1085,15 @@ void Preprocessor::removeCachedMacroExpandedTokensOfLastLexer() {
 /// the identifier tokens inserted.
 static void ComputeDATE_TIME(SourceLocation &DATELoc, SourceLocation &TIMELoc,
                              Preprocessor &PP) {
-  time_t TT = time(nullptr);
-  struct tm *TM = localtime(&TT);
+  time_t TT;
+  std::tm *TM;
+  if (PP.getPreprocessorOpts().SourceDateEpoch) {
+    TT = *PP.getPreprocessorOpts().SourceDateEpoch;
+    TM = std::gmtime(&TT);
+  } else {
+    TT = std::time(nullptr);
+    TM = std::localtime(&TT);
+  }
 
   static const char * const Months[] = {
     "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"
@@ -1091,8 +1102,11 @@ static void ComputeDATE_TIME(SourceLocation &DATELoc, SourceLocation &TIMELoc,
   {
     SmallString<32> TmpBuffer;
     llvm::raw_svector_ostream TmpStream(TmpBuffer);
-    TmpStream << llvm::format("\"%s %2d %4d\"", Months[TM->tm_mon],
-                              TM->tm_mday, TM->tm_year + 1900);
+    if (TM)
+      TmpStream << llvm::format("\"%s %2d %4d\"", Months[TM->tm_mon],
+                                TM->tm_mday, TM->tm_year + 1900);
+    else
+      TmpStream << "??? ?? ????";
     Token TmpTok;
     TmpTok.startToken();
     PP.CreateString(TmpStream.str(), TmpTok);
@@ -1102,8 +1116,11 @@ static void ComputeDATE_TIME(SourceLocation &DATELoc, SourceLocation &TIMELoc,
   {
     SmallString<32> TmpBuffer;
     llvm::raw_svector_ostream TmpStream(TmpBuffer);
-    TmpStream << llvm::format("\"%02d:%02d:%02d\"",
-                              TM->tm_hour, TM->tm_min, TM->tm_sec);
+    if (TM)
+      TmpStream << llvm::format("\"%02d:%02d:%02d\"", TM->tm_hour, TM->tm_min,
+                                TM->tm_sec);
+    else
+      TmpStream << "??:??:??";
     Token TmpTok;
     TmpTok.startToken();
     PP.CreateString(TmpStream.str(), TmpTok);
@@ -1431,6 +1448,39 @@ static bool isTargetEnvironment(const TargetInfo &TI,
   return TI.getTriple().getEnvironment() == Env.getEnvironment();
 }
 
+/// Implements the __is_target_variant_os builtin macro.
+static bool isTargetVariantOS(const TargetInfo &TI, const IdentifierInfo *II) {
+  if (TI.getTriple().isOSDarwin()) {
+    const llvm::Triple *VariantTriple = TI.getDarwinTargetVariantTriple();
+    if (!VariantTriple)
+      return false;
+
+    std::string OSName =
+        (llvm::Twine("unknown-unknown-") + II->getName().lower()).str();
+    llvm::Triple OS(OSName);
+    if (OS.getOS() == llvm::Triple::Darwin) {
+      // Darwin matches macos, ios, etc.
+      return VariantTriple->isOSDarwin();
+    }
+    return VariantTriple->getOS() == OS.getOS();
+  }
+  return false;
+}
+
+/// Implements the __is_target_variant_environment builtin macro.
+static bool isTargetVariantEnvironment(const TargetInfo &TI,
+                                const IdentifierInfo *II) {
+  if (TI.getTriple().isOSDarwin()) {
+    const llvm::Triple *VariantTriple = TI.getDarwinTargetVariantTriple();
+    if (!VariantTriple)
+      return false;
+    std::string EnvName = (llvm::Twine("---") + II->getName().lower()).str();
+    llvm::Triple Env(EnvName);
+    return VariantTriple->getEnvironment() == Env.getEnvironment();
+  }
+  return false;
+}
+
 /// ExpandBuiltinMacro - If an identifier token is read that is to be expanded
 /// as a builtin macro, handle it and return the next token as 'Tok'.
 void Preprocessor::ExpandBuiltinMacro(Token &Tok) {
@@ -1556,22 +1606,24 @@ void Preprocessor::ExpandBuiltinMacro(Token &Tok) {
     Diag(Tok.getLocation(), diag::warn_pp_date_time);
     // MSVC, ICC, GCC, VisualAge C++ extension.  The generated string should be
     // of the form "Ddd Mmm dd hh::mm::ss yyyy", which is returned by asctime.
-
-    // Get the file that we are lexing out of.  If we're currently lexing from
-    // a macro, dig into the include stack.
-    const FileEntry *CurFile = nullptr;
-    PreprocessorLexer *TheLexer = getCurrentFileLexer();
-
-    if (TheLexer)
-      CurFile = SourceMgr.getFileEntryForID(TheLexer->getFileID());
-
     const char *Result;
-    if (CurFile) {
-      time_t TT = CurFile->getModificationTime();
-      struct tm *TM = localtime(&TT);
+    if (getPreprocessorOpts().SourceDateEpoch) {
+      time_t TT = *getPreprocessorOpts().SourceDateEpoch;
+      std::tm *TM = std::gmtime(&TT);
       Result = asctime(TM);
     } else {
-      Result = "??? ??? ?? ??:??:?? ????\n";
+      // Get the file that we are lexing out of.  If we're currently lexing from
+      // a macro, dig into the include stack.
+      const FileEntry *CurFile = nullptr;
+      if (PreprocessorLexer *TheLexer = getCurrentFileLexer())
+        CurFile = SourceMgr.getFileEntryForID(TheLexer->getFileID());
+      if (CurFile) {
+        time_t TT = CurFile->getModificationTime();
+        struct tm *TM = localtime(&TT);
+        Result = asctime(TM);
+      } else {
+        Result = "??? ??? ?? ??:??:?? ????\n";
+      }
     }
     // Surround the string with " and strip the trailing newline.
     OS << '"' << StringRef(Result).drop_back() << '"';
@@ -1678,6 +1730,8 @@ void Preprocessor::ExpandBuiltinMacro(Token &Tok) {
               .Case("__is_target_vendor", true)
               .Case("__is_target_os", true)
               .Case("__is_target_environment", true)
+              .Case("__is_target_variant_os", true)
+              .Case("__is_target_variant_environment", true)
               .Default(false);
         }
       });
@@ -1877,6 +1931,22 @@ void Preprocessor::ExpandBuiltinMacro(Token &Tok) {
           IdentifierInfo *II = ExpectFeatureIdentifierInfo(
               Tok, *this, diag::err_feature_check_malformed);
           return II && isTargetEnvironment(getTargetInfo(), II);
+        });
+  } else if (II == Ident__is_target_variant_os) {
+    EvaluateFeatureLikeBuiltinMacro(
+        OS, Tok, II, *this, false,
+        [this](Token &Tok, bool &HasLexedNextToken) -> int {
+          IdentifierInfo *II = ExpectFeatureIdentifierInfo(
+              Tok, *this, diag::err_feature_check_malformed);
+          return II && isTargetVariantOS(getTargetInfo(), II);
+        });
+  } else if (II == Ident__is_target_variant_environment) {
+    EvaluateFeatureLikeBuiltinMacro(
+        OS, Tok, II, *this, false,
+        [this](Token &Tok, bool &HasLexedNextToken) -> int {
+          IdentifierInfo *II = ExpectFeatureIdentifierInfo(
+              Tok, *this, diag::err_feature_check_malformed);
+          return II && isTargetVariantEnvironment(getTargetInfo(), II);
         });
   } else {
     llvm_unreachable("Unknown identifier!");

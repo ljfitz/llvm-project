@@ -17,15 +17,21 @@
 #include <__functional/unary_function.h>
 #include <__iterator/iterator_traits.h>
 #include <__memory/addressof.h>
+#include <__memory/allocator.h>
 #include <__memory/allocator_traits.h>
+#include <__memory/builtin_new_allocator.h>
 #include <__memory/compressed_pair.h>
 #include <__memory/shared_ptr.h>
+#include <__memory/unique_ptr.h>
 #include <__utility/forward.h>
 #include <__utility/move.h>
+#include <__utility/piecewise_construct.h>
 #include <__utility/swap.h>
 #include <exception>
-#include <memory> // TODO: replace with <__memory/__builtin_new_allocator.h>
+#include <new>
+#include <tuple>
 #include <type_traits>
+#include <typeinfo>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
@@ -45,13 +51,13 @@ public:
 // bad_function_call will end up containing a weak definition of the vtable and
 // typeinfo.
 #ifdef _LIBCPP_ABI_BAD_FUNCTION_CALL_KEY_FUNCTION
-    virtual ~bad_function_call() _NOEXCEPT;
+    ~bad_function_call() _NOEXCEPT override;
 #else
-    virtual ~bad_function_call() _NOEXCEPT {}
+    ~bad_function_call() _NOEXCEPT override {}
 #endif
 
 #ifdef _LIBCPP_ABI_BAD_FUNCTION_CALL_GOOD_WHAT_MESSAGE
-    virtual const char* what() const _NOEXCEPT;
+    const char* what() const _NOEXCEPT override;
 #endif
 };
 _LIBCPP_DIAGNOSTIC_POP
@@ -190,9 +196,7 @@ class __alloc_func<_Fp, _Ap, _Rp(_ArgTypes...)>
     __alloc_func* __clone() const
     {
         typedef allocator_traits<_Alloc> __alloc_traits;
-        typedef
-            typename __rebind_alloc_helper<__alloc_traits, __alloc_func>::type
-                _AA;
+        typedef __rebind_alloc<__alloc_traits, __alloc_func> _AA;
         _AA __a(__f_.second());
         typedef __allocator_destructor<_AA> _Dp;
         unique_ptr<__alloc_func, _Dp> __hold(__a.allocate(1), _Dp(__a, 1));
@@ -205,8 +209,7 @@ class __alloc_func<_Fp, _Ap, _Rp(_ArgTypes...)>
 
     static void __destroy_and_delete(__alloc_func* __f) {
       typedef allocator_traits<_Alloc> __alloc_traits;
-      typedef typename __rebind_alloc_helper<__alloc_traits, __alloc_func>::type
-          _FunAlloc;
+      typedef __rebind_alloc<__alloc_traits, __alloc_func> _FunAlloc;
       _FunAlloc __a(__f->__get_allocator());
       __f->destroy();
       __a.deallocate(__f, 1);
@@ -319,7 +322,7 @@ __base<_Rp(_ArgTypes...)>*
 __func<_Fp, _Alloc, _Rp(_ArgTypes...)>::__clone() const
 {
     typedef allocator_traits<_Alloc> __alloc_traits;
-    typedef typename __rebind_alloc_helper<__alloc_traits, __func>::type _Ap;
+    typedef __rebind_alloc<__alloc_traits, __func> _Ap;
     _Ap __a(__f_.__get_allocator());
     typedef __allocator_destructor<_Ap> _Dp;
     unique_ptr<__func, _Dp> __hold(__a.allocate(1), _Dp(__a, 1));
@@ -346,7 +349,7 @@ void
 __func<_Fp, _Alloc, _Rp(_ArgTypes...)>::destroy_deallocate() _NOEXCEPT
 {
     typedef allocator_traits<_Alloc> __alloc_traits;
-    typedef typename __rebind_alloc_helper<__alloc_traits, __func>::type _Ap;
+    typedef __rebind_alloc<__alloc_traits, __func> _Ap;
     _Ap __a(__f_.__get_allocator());
     __f_.destroy();
     __a.deallocate(this, 1);
@@ -405,8 +408,7 @@ template <class _Rp, class... _ArgTypes> class __value_func<_Rp(_ArgTypes...)>
     {
         typedef allocator_traits<_Alloc> __alloc_traits;
         typedef __function::__func<_Fp, _Alloc, _Rp(_ArgTypes...)> _Fun;
-        typedef typename __rebind_alloc_helper<__alloc_traits, _Fun>::type
-            _FunAlloc;
+        typedef __rebind_alloc<__alloc_traits, _Fun> _FunAlloc;
 
         if (__function::__not_null(__f))
         {
@@ -670,8 +672,7 @@ struct __policy
 // Used to choose between perfect forwarding or pass-by-value. Pass-by-value is
 // faster for types that can be passed in registers.
 template <typename _Tp>
-using __fast_forward =
-    typename conditional<is_scalar<_Tp>::value, _Tp, _Tp&&>::type;
+using __fast_forward = __conditional_t<is_scalar<_Tp>::value, _Tp, _Tp&&>;
 
 // __policy_invoker calls an instance of __alloc_func held in __policy_storage.
 
@@ -747,8 +748,7 @@ template <class _Rp, class... _ArgTypes> class __policy_func<_Rp(_ArgTypes...)>
     {
         typedef __alloc_func<_Fp, _Alloc, _Rp(_ArgTypes...)> _Fun;
         typedef allocator_traits<_Alloc> __alloc_traits;
-        typedef typename __rebind_alloc_helper<__alloc_traits, _Fun>::type
-            _FunAlloc;
+        typedef __rebind_alloc<__alloc_traits, _Fun> _FunAlloc;
 
         if (__function::__not_null(__f))
         {
@@ -968,7 +968,7 @@ class _LIBCPP_TEMPLATE_VIS function<_Rp(_ArgTypes...)>
     __func __f_;
 
     template <class _Fp, bool = _And<
-        _IsNotSame<__uncvref_t<_Fp>, function>,
+        _IsNotSame<__remove_cvref_t<_Fp>, function>,
         __invokable<_Fp, _ArgTypes...>
     >::value>
     struct __callable;
@@ -1348,7 +1348,7 @@ __base<_Rp()>*
 __func<_Fp, _Alloc, _Rp()>::__clone() const
 {
     typedef allocator_traits<_Alloc> __alloc_traits;
-    typedef typename __rebind_alloc_helper<__alloc_traits, __func>::type _Ap;
+    typedef __rebind_alloc<__alloc_traits, __func> _Ap;
     _Ap __a(__f_.second());
     typedef __allocator_destructor<_Ap> _Dp;
     unique_ptr<__func, _Dp> __hold(__a.allocate(1), _Dp(__a, 1));
@@ -1375,7 +1375,7 @@ void
 __func<_Fp, _Alloc, _Rp()>::destroy_deallocate()
 {
     typedef allocator_traits<_Alloc> __alloc_traits;
-    typedef typename __rebind_alloc_helper<__alloc_traits, __func>::type _Ap;
+    typedef __rebind_alloc<__alloc_traits, __func> _Ap;
     _Ap __a(__f_.second());
     __f_.~__compressed_pair<_Fp, _Alloc>();
     __a.deallocate(this, 1);
@@ -1434,7 +1434,7 @@ __base<_Rp(_A0)>*
 __func<_Fp, _Alloc, _Rp(_A0)>::__clone() const
 {
     typedef allocator_traits<_Alloc> __alloc_traits;
-    typedef typename __rebind_alloc_helper<__alloc_traits, __func>::type _Ap;
+    typedef __rebind_alloc<__alloc_traits, __func> _Ap;
     _Ap __a(__f_.second());
     typedef __allocator_destructor<_Ap> _Dp;
     unique_ptr<__func, _Dp> __hold(__a.allocate(1), _Dp(__a, 1));
@@ -1461,7 +1461,7 @@ void
 __func<_Fp, _Alloc, _Rp(_A0)>::destroy_deallocate()
 {
     typedef allocator_traits<_Alloc> __alloc_traits;
-    typedef typename __rebind_alloc_helper<__alloc_traits, __func>::type _Ap;
+    typedef __rebind_alloc<__alloc_traits, __func> _Ap;
     _Ap __a(__f_.second());
     __f_.~__compressed_pair<_Fp, _Alloc>();
     __a.deallocate(this, 1);
@@ -1520,7 +1520,7 @@ __base<_Rp(_A0, _A1)>*
 __func<_Fp, _Alloc, _Rp(_A0, _A1)>::__clone() const
 {
     typedef allocator_traits<_Alloc> __alloc_traits;
-    typedef typename __rebind_alloc_helper<__alloc_traits, __func>::type _Ap;
+    typedef __rebind_alloc<__alloc_traits, __func> _Ap;
     _Ap __a(__f_.second());
     typedef __allocator_destructor<_Ap> _Dp;
     unique_ptr<__func, _Dp> __hold(__a.allocate(1), _Dp(__a, 1));
@@ -1547,7 +1547,7 @@ void
 __func<_Fp, _Alloc, _Rp(_A0, _A1)>::destroy_deallocate()
 {
     typedef allocator_traits<_Alloc> __alloc_traits;
-    typedef typename __rebind_alloc_helper<__alloc_traits, __func>::type _Ap;
+    typedef __rebind_alloc<__alloc_traits, __func> _Ap;
     _Ap __a(__f_.second());
     __f_.~__compressed_pair<_Fp, _Alloc>();
     __a.deallocate(this, 1);
@@ -1606,7 +1606,7 @@ __base<_Rp(_A0, _A1, _A2)>*
 __func<_Fp, _Alloc, _Rp(_A0, _A1, _A2)>::__clone() const
 {
     typedef allocator_traits<_Alloc> __alloc_traits;
-    typedef typename __rebind_alloc_helper<__alloc_traits, __func>::type _Ap;
+    typedef __rebind_alloc<__alloc_traits, __func> _Ap;
     _Ap __a(__f_.second());
     typedef __allocator_destructor<_Ap> _Dp;
     unique_ptr<__func, _Dp> __hold(__a.allocate(1), _Dp(__a, 1));
@@ -1633,7 +1633,7 @@ void
 __func<_Fp, _Alloc, _Rp(_A0, _A1, _A2)>::destroy_deallocate()
 {
     typedef allocator_traits<_Alloc> __alloc_traits;
-    typedef typename __rebind_alloc_helper<__alloc_traits, __func>::type _Ap;
+    typedef __rebind_alloc<__alloc_traits, __func> _Ap;
     _Ap __a(__f_.second());
     __f_.~__compressed_pair<_Fp, _Alloc>();
     __a.deallocate(this, 1);
@@ -1809,7 +1809,7 @@ function<_Rp()>::function(allocator_arg_t, const _Alloc& __a0, _Fp __f,
         }
         else
         {
-            typedef typename __rebind_alloc_helper<__alloc_traits, _FF>::type _Ap;
+            typedef __rebind_alloc<__alloc_traits, _FF> _Ap;
             _Ap __a(__a0);
             typedef __allocator_destructor<_Ap> _Dp;
             unique_ptr<__base, _Dp> __hold(__a.allocate(1), _Dp(__a, 1));
@@ -2087,7 +2087,7 @@ function<_Rp(_A0)>::function(allocator_arg_t, const _Alloc& __a0, _Fp __f,
         }
         else
         {
-            typedef typename __rebind_alloc_helper<__alloc_traits, _FF>::type _Ap;
+            typedef __rebind_alloc<__alloc_traits, _FF> _Ap;
             _Ap __a(__a0);
             typedef __allocator_destructor<_Ap> _Dp;
             unique_ptr<__base, _Dp> __hold(__a.allocate(1), _Dp(__a, 1));
@@ -2365,7 +2365,7 @@ function<_Rp(_A0, _A1)>::function(allocator_arg_t, const _Alloc& __a0, _Fp __f,
         }
         else
         {
-            typedef typename __rebind_alloc_helper<__alloc_traits, _FF>::type _Ap;
+            typedef __rebind_alloc<__alloc_traits, _FF> _Ap;
             _Ap __a(__a0);
             typedef __allocator_destructor<_Ap> _Dp;
             unique_ptr<__base, _Dp> __hold(__a.allocate(1), _Dp(__a, 1));
@@ -2643,7 +2643,7 @@ function<_Rp(_A0, _A1, _A2)>::function(allocator_arg_t, const _Alloc& __a0, _Fp 
         }
         else
         {
-            typedef typename __rebind_alloc_helper<__alloc_traits, _FF>::type _Ap;
+            typedef __rebind_alloc<__alloc_traits, _FF> _Ap;
             _Ap __a(__a0);
             typedef __allocator_destructor<_Ap> _Dp;
             unique_ptr<__base, _Dp> __hold(__a.allocate(1), _Dp(__a, 1));

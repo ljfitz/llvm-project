@@ -564,7 +564,7 @@ void ODRHash::AddFunctionDecl(const FunctionDecl *Function,
   AddQualType(Function->getReturnType());
 
   ID.AddInteger(Function->param_size());
-  for (auto Param : Function->parameters())
+  for (auto *Param : Function->parameters())
     AddSubDecl(Param);
 
   if (SkipBody) {
@@ -671,7 +671,7 @@ public:
     }
   }
 
-  void AddDecl(Decl *D) {
+  void AddDecl(const Decl *D) {
     Hash.AddBoolean(D);
     if (D) {
       Hash.AddDecl(D);
@@ -934,7 +934,7 @@ public:
 
     auto Protocols = T->getProtocols();
     ID.AddInteger(Protocols.size());
-    for (auto Protocol : Protocols) {
+    for (auto *Protocol : Protocols) {
       AddDecl(Protocol);
     }
 
@@ -952,7 +952,7 @@ public:
     AddDecl(T->getDecl());
     auto Protocols = T->getProtocols();
     ID.AddInteger(Protocols.size());
-    for (auto Protocol : Protocols) {
+    for (auto *Protocol : Protocols) {
       AddDecl(Protocol);
     }
 
@@ -995,13 +995,13 @@ public:
 
   void
   VisitSubstTemplateTypeParmPackType(const SubstTemplateTypeParmPackType *T) {
-    AddType(T->getReplacedParameter());
+    AddDecl(T->getAssociatedDecl());
     Hash.AddTemplateArgument(T->getArgumentPack());
     VisitType(T);
   }
 
   void VisitSubstTemplateTypeParmType(const SubstTemplateTypeParmType *T) {
-    AddType(T->getReplacedParameter());
+    AddDecl(T->getAssociatedDecl());
     AddQualType(T->getReplacementType());
     VisitType(T);
   }
@@ -1061,7 +1061,7 @@ public:
     VisitType(T);
   }
   void VisitTypeOfType(const TypeOfType *T) {
-    AddQualType(T->getUnderlyingType());
+    AddQualType(T->getUnmodifiedType());
     VisitType(T);
   }
 

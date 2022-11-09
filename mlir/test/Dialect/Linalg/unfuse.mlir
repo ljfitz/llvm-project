@@ -53,7 +53,7 @@ func.func @unfuse_conv_2d_tensor_add_globalaveragepool(%ifm : tensor<1x1024x10x1
     // CHECK-SAME: ins(%[[ifm]], %[[weights]] :
     // CHECK-SAME: outs(%[[biased]] :
     // CHECK: %[[add:.+]] = arith.addf %[[conv]], %[[summand]]
-    // CHECK: %[[init:.+]] = linalg.init_tensor
+    // CHECK: %[[init:.+]] = tensor.empty()
     // CHECK: %[[pool:.+]] = linalg.pooling_nchw_sum
     // CHECK-SAME: ins(%[[add]], %[[init]] :
     // CHECK-SAME: outs(%[[cst]] :
@@ -159,7 +159,7 @@ func.func @unfuse_conv_2d_tensor_add_relu_globalaveragepool(%ifm : tensor<1x1024
     // CHECK: %[[relu:.+]] = linalg.relu_2d_nchw
     // CHECK-SAME: ins(%[[add]] :
     // CHECK-SAME: outs(%[[add]] :
-    // CHECK: %[[init:.+]] = linalg.init_tensor
+    // CHECK: %[[init:.+]] = tensor.empty()
     // CHECK: %[[pool:.+]] = linalg.pooling_nchw_sum
     // CHECK-SAME: ins(%[[relu]], %[[init]] :
     // CHECK-SAME: outs(%[[cst]] :
@@ -273,7 +273,7 @@ func.func @unfuse_conv_2d_tensor_add_relu_globalaveragepool(%ifm : tensor<1x1024
     // CHECK: %[[lrelu:.+]] = linalg.lrelu_2d_nchw
     // CHECK-SAME: ins(%[[add]], %[[alpha]] :
     // CHECK-SAME: outs(%[[add]] :
-    // CHECK: %[[init:.+]] = linalg.init_tensor
+    // CHECK: %[[init:.+]] = tensor.empty()
     // CHECK: %[[pool:.+]] = linalg.pooling_nchw_sum
     // CHECK-SAME: ins(%[[lrelu]], %[[init]] :
     // CHECK-SAME: outs(%[[cst]] :
@@ -303,10 +303,10 @@ func.func @unfuse_conv_2d_lrelu_maxpool(%ifm : tensor<1x1024x15x15xf32>) -> tens
         {
             dilations = dense<1> : tensor<2xi64>,
             strides = dense<1> : tensor<2xi64>,
-            mp_kernel_size = dense<2> : tensor<2xi64>,
-            mp_strides = dense<2> : tensor<2xi64>,
-            mp_dilations = dense<1> : tensor<2xi64>,
-            mp_padding = dense<[0, 1, 0, 1]> : tensor<4xi64>
+            mpKernelSize = dense<2> : tensor<2xi64>,
+            mpStrides = dense<2> : tensor<2xi64>,
+            mpDilations = dense<1> : tensor<2xi64>,
+            mpPadding = dense<[0, 1, 0, 1]> : tensor<4xi64>
         }
         ins(%ifm, %weights, %bias, %alpha : tensor<1x1024x15x15xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>, f32)
         outs(%init : tensor<1x1024x7x7xf32>)
@@ -326,7 +326,7 @@ func.func @unfuse_conv_2d_lrelu_maxpool(%ifm : tensor<1x1024x15x15xf32>) -> tens
     // CHECK: %[[padded:.+]] = tensor.pad %[[lrelu]] low[0, 0, 0, 0] high[0, 0, 1, 1]
     // CHECK: tensor.yield %[[pad_value]] : f32
 
-    // CHECK: %[[pool:.+]] = linalg.init_tensor [2, 2]
+    // CHECK: %[[pool:.+]] = tensor.empty()
 
     // CHECK: %[[out:.+]] = linalg.pooling_nchw_max
     // CHECK: ins(%[[padded]], %[[pool]] :
@@ -353,10 +353,10 @@ func.func @unfuse_conv_2d_relu_maxpool(%ifm : tensor<1x1024x15x15xf32>) -> tenso
         {
             dilations = dense<1> : tensor<2xi64>,
             strides = dense<1> : tensor<2xi64>,
-            mp_kernel_size = dense<2> : tensor<2xi64>,
-            mp_strides = dense<2> : tensor<2xi64>,
-            mp_dilations = dense<1> : tensor<2xi64>,
-            mp_padding = dense<[0, 1, 0, 1]> : tensor<4xi64>
+            mpKernelSize = dense<2> : tensor<2xi64>,
+            mpStrides = dense<2> : tensor<2xi64>,
+            mpDilations = dense<1> : tensor<2xi64>,
+            mpPadding = dense<[0, 1, 0, 1]> : tensor<4xi64>
         }
         ins(%ifm, %weights, %bias : tensor<1x1024x15x15xf32>, tensor<1024x1024x3x3xf32>, tensor<1024xf32>)
         outs(%init : tensor<1x1024x7x7xf32>)
@@ -376,7 +376,7 @@ func.func @unfuse_conv_2d_relu_maxpool(%ifm : tensor<1x1024x15x15xf32>) -> tenso
     // CHECK: %[[padded:.+]] = tensor.pad %[[lrelu]] low[0, 0, 0, 0] high[0, 0, 1, 1]
     // CHECK: tensor.yield %[[pad_value]] : f32
 
-    // CHECK: %[[pool:.+]] = linalg.init_tensor [2, 2]
+    // CHECK: %[[pool:.+]] = tensor.empty()
 
     // CHECK: %[[out:.+]] = linalg.pooling_nchw_max
     // CHECK: ins(%[[padded]], %[[pool]] :
@@ -425,7 +425,7 @@ func.func @unfuse_globalaveragepool2d(%ifm : tensor<1x2048x7x7xf32>) -> tensor<1
 
     // CHECK: %[[accu:.+]] = arith.constant dense<0.000000e+00> : tensor<1x2048x1x1xf32>
     // CHECK: %[[div:.+]] = arith.constant dense<4.900000e+01> : tensor<1x2048x1x1xf32>
-    // CHECK: %[[krnl:.+]] = linalg.init_tensor [7, 7] : tensor<7x7xf32>
+    // CHECK: %[[krnl:.+]] = tensor.empty() : tensor<7x7xf32>
     // CHECK: %[[sum:.+]] = linalg.pooling_nchw_sum {dilations = dense<1> : vector<2xi64>, strides = dense<1> : vector<2xi64>} ins(%arg0, %0 : tensor<1x2048x7x7xf32>, tensor<7x7xf32>) outs(%[[accu]] : tensor<1x2048x1x1xf32>) -> tensor<1x2048x1x1xf32>
     // CHECK: %[[out:.+]] = arith.divf %[[sum]], %[[div]] : tensor<1x2048x1x1xf32>
 
@@ -443,9 +443,9 @@ func.func @unfuse_linear(%input: tensor<1x2048xf32>, %weights: tensor<1000x2048x
     %init = tensor.splat %zero : tensor<1x1000xf32>
     %result = linalg.linear ins(%input, %weights, %bias: tensor<1x2048xf32>, tensor<1000x2048xf32>, tensor<1000xf32>) outs(%init: tensor<1x1000xf32>) -> tensor<1x1000xf32>
 
-// CHECK:  %[[tweightshape:.+]] = linalg.init_tensor [2048, 1000] : tensor<2048x1000xf32>
+// CHECK:  %[[tweightshape:.+]] = tensor.empty() : tensor<2048x1000xf32>
 // CHECK:  %[[tweights:.+]] = linalg.transpose2d ins(%arg1 : tensor<1000x2048xf32>) outs(%0 : tensor<2048x1000xf32>) -> tensor<2048x1000xf32>
-// CHECK:  %[[bias2dshape:.+]] = linalg.init_tensor [1, 1000] : tensor<1x1000xf32>
+// CHECK:  %[[bias2dshape:.+]] = tensor.empty() : tensor<1x1000xf32>
 // CHECK:  %[[bias2d:.+]] = linalg.broadcast_1d_to_2d ins(%arg2 : tensor<1000xf32>) outs(%2 : tensor<1x1000xf32>) -> tensor<1x1000xf32>
 // CHECK:  %[[out:.+]] = linalg.matmul ins(%[[input]], %[[tweights]] : tensor<1x2048xf32>, tensor<2048x1000xf32>) outs(%[[bias2d]] : tensor<1x1000xf32>) -> tensor<1x1000xf32
 // CHECK: return %[[out]]

@@ -7987,6 +7987,7 @@ class sve_int_brkn<bit S, string asm>
 
   let Constraints = "$Pdm = $_Pdm";
   let Defs = !if(S, [NZCV], []);
+  let ElementSize = ElementSizeB;
 }
 
 multiclass sve_int_brkn<bits<1> opc, string asm, SDPatternOperator op> {
@@ -8054,6 +8055,7 @@ class sve2_char_match<bit sz, bit opc, string asm,
   let Inst{3-0}   = Pd;
 
   let Defs = [NZCV];
+  let ElementSize = pprty.ElementSize;
   let isPTestLike = 1;
 }
 
