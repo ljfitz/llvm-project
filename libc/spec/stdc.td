@@ -3,6 +3,7 @@ def StdC : StandardSpec<"stdc"> {
   NamedType StructTmType = NamedType<"struct tm">;
   PtrType StructTmPtr = PtrType<StructTmType>;
   PtrType TimeTTypePtr = PtrType<TimeTType>;
+  NamedType ClockT = NamedType<"clock_t">;
 
   NamedType DivTType = NamedType<"div_t">;
   NamedType LDivTType = NamedType<"ldiv_t">;
@@ -491,6 +492,7 @@ def StdC : StandardSpec<"stdc"> {
   HeaderSpec StdIO = HeaderSpec<
       "stdio.h",
       [
+          Macro<"stdin">,
           Macro<"stderr">,
           Macro<"stdout">,
           Macro<"_IOFBF">,
@@ -525,6 +527,20 @@ def StdC : StandardSpec<"stdc"> {
               [ArgSpec<FILEPtr>]
           >,
           FunctionSpec<
+              "fgetc",
+              RetValSpec<IntType>,
+              [ArgSpec<FILEPtr>]
+          >,
+          FunctionSpec<
+              "fgets",
+              RetValSpec<CharPtr>,
+              [
+                ArgSpec<CharRestrictedPtr>,
+                ArgSpec<IntType>,
+                ArgSpec<FILERestrictedPtr>,
+              ]
+          >,
+          FunctionSpec<
               "fflush",
               RetValSpec<IntType>,
               [ArgSpec<FILEPtr>]
@@ -534,6 +550,23 @@ def StdC : StandardSpec<"stdc"> {
               RetValSpec<FILEPtr>,
               [ArgSpec<ConstCharPtr>,
                ArgSpec<ConstCharPtr>]
+          >,
+          FunctionSpec<
+              "fputc",
+              RetValSpec<IntType>,
+              [ArgSpec<IntType>,
+               ArgSpec<FILEPtr>]
+          >,
+          FunctionSpec<
+              "putc",
+              RetValSpec<IntType>,
+              [ArgSpec<IntType>,
+               ArgSpec<FILEPtr>]
+          >,
+          FunctionSpec<
+              "putchar",
+              RetValSpec<IntType>,
+              [ArgSpec<IntType>]
           >,
           FunctionSpec<
               "fputs",
@@ -604,6 +637,10 @@ def StdC : StandardSpec<"stdc"> {
           >,
       ],
       [
+          ObjectSpec<
+              "stdin",
+              "FILE *"
+          >,
           ObjectSpec<
               "stdout",
               "FILE *"
@@ -890,8 +927,9 @@ def StdC : StandardSpec<"stdc"> {
       "time.h",
       [], // Macros
       [ // Types
-       StructTmType,
-       TimeTType,
+         ClockT,
+         StructTmType,
+         TimeTType,
       ],
       [], // Enumerations
       [
@@ -906,6 +944,19 @@ def StdC : StandardSpec<"stdc"> {
               [
                   ArgSpec<StructTmPtr>,
                   ArgSpec<CharPtr>,
+              ]
+          >,
+          FunctionSpec<
+              "clock",
+              RetValSpec<ClockT>,
+              [ArgSpec<VoidType>]
+          >,
+          FunctionSpec<
+              "difftime",
+              RetValSpec<DoubleType>,
+              [
+                  ArgSpec<TimeTType>,
+                  ArgSpec<TimeTType>,
               ]
           >,
           FunctionSpec<
@@ -925,6 +976,11 @@ def StdC : StandardSpec<"stdc"> {
               "mktime",
               RetValSpec<TimeTType>,
               [ArgSpec<StructTmPtr>]
+          >,
+          FunctionSpec<
+              "time",
+              RetValSpec<TimeTType>,
+              [ArgSpec<TimeTTypePtr>]
           >,
       ]
   >;

@@ -13,9 +13,11 @@
 #ifndef VECTOR_OPS
 #define VECTOR_OPS
 
-include "mlir/Dialect/Vector/Interfaces/MaskingInterfaces.td"
+include "mlir/Dialect/Vector/Interfaces/MaskableOpInterface.td"
+include "mlir/Dialect/Vector/Interfaces/MaskingOpInterface.td"
 include "mlir/IR/EnumAttr.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
+include "mlir/Interfaces/DestinationStyleOpInterface.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 include "mlir/Interfaces/VectorInterfaces.td"
@@ -114,22 +116,23 @@ def Vector_ContractionOp :
     An iterator type attribute list must be specified, where each element of
     the list represents an iterator with one of the following types:
 
-    *) "reduction": reduction dimensions are present in the lhs and rhs
-                    arguments but not in the output (and accumulator
-                    argument). These are the dimensions along which the vector
-                    contraction op computes the sum of products, and
-                    contracting dimension pair dimension sizes must match
-                    between lhs/rhs.
-    *) "parallel": Batch dimensions are iterator type "parallel", and
-                   are non-contracting dimensions present in the lhs, rhs and
-                   output. The lhs/rhs co-iterate along the batch dimensions,
-                   which should be expressed in their indexing maps.
+    *   "reduction": reduction dimensions are present in the lhs and rhs
+        arguments but not in the output (and accumulator
+        argument). These are the dimensions along which the vector
+        contraction op computes the sum of products, and
+        contracting dimension pair dimension sizes must match
+        between lhs/rhs.
 
-                   Free dimensions are iterator type "parallel", and are
-                   non-contraction, non-batch dimensions accessed by either the
-                   lhs or rhs (but not both). The lhs and rhs free dimensions
-                   are unrelated to each other and do not co-iterate, which
-                   should be expressed in their indexing maps.
+    *   "parallel": Batch dimensions are iterator type "parallel", and
+        are non-contracting dimensions present in the lhs, rhs and
+        output. The lhs/rhs co-iterate along the batch dimensions,
+        which should be expressed in their indexing maps.
+
+        Free dimensions are iterator type "parallel", and are
+        non-contraction, non-batch dimensions accessed by either the
+        lhs or rhs (but not both). The lhs and rhs free dimensions
+        are unrelated to each other and do not co-iterate, which
+        should be expressed in their indexing maps.
 
     An indexing map attribute list must be specified with an entry for lhs, rhs
     and acc arguments. An indexing map attribute specifies a mapping from each
@@ -1269,7 +1272,8 @@ def Vector_TransferWriteOp :
       DeclareOpInterfaceMethods<VectorUnrollOpInterface, ["getShapeForUnroll"]>,
       DeclareOpInterfaceMethods<MaskableOpInterface>,
       DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
-      AttrSizedOperandSegments
+      AttrSizedOperandSegments,
+      DestinationStyleOpInterface
   ]>,
     Arguments<(ins AnyVectorOfAnyRank:$vector,
                    AnyShaped:$source,
@@ -1392,6 +1396,10 @@ def Vector_TransferWriteOp :
     /// This method is added to maintain uniformity with load/store
     ///  ops of other dialects.
     Value getValue() { return getVector(); }
+
+    std::pair<int64_t, int64_t> getDpsInitsPositionRange() {
+      return {1, 2};  // `source` operand
+    }
   }];
 
   let hasFolder = 1;
@@ -2133,13 +2141,15 @@ def Vector_CreateMaskOp :
 }
 
 def Vector_MaskOp : Vector_Op<"mask", [
-  SingleBlockImplicitTerminator<"vector::YieldOp">, RecursiveMemoryEffects,
-  NoRegionArguments
+  SingleBlockImplicitTerminator<"vector::YieldOp">,
+  DeclareOpInterfaceMethods<MaskingOpInterface>,
+  RecursiveMemoryEffects, NoRegionArguments
 ]> {
   let summary = "Predicates a maskable vector operation";
   let description = [{
-    The `vector.mask` operation predicates the execution of another operation.
-    It takes an `i1` vector mask and an optional pass-thru vector as arguments.
+    The `vector.mask` is a `MaskingOpInterface` operation that predicates the
+    execution of another operation. It takes an `i1` vector mask and an
+    optional passthru vector as arguments.
     A `vector.yield`-terminated region encloses the operation to be masked.
     Values used within the region are captured from above. Only one *maskable*
     operation can be masked with a `vector.mask` operation at a time. An

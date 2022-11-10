@@ -41,12 +41,6 @@ template <class Emitter>
 class ByteCodeExprGen : public ConstStmtVisitor<ByteCodeExprGen<Emitter>, bool>,
                         public Emitter {
 protected:
-  // Emitters for opcodes of various arities.
-  using NullaryFn = bool (ByteCodeExprGen::*)(const SourceInfo &);
-  using UnaryFn = bool (ByteCodeExprGen::*)(PrimType, const SourceInfo &);
-  using BinaryFn = bool (ByteCodeExprGen::*)(PrimType, PrimType,
-                                             const SourceInfo &);
-
   // Aliases for types defined in the emitter.
   using LabelTy = typename Emitter::LabelTy;
   using AddrTy = typename Emitter::AddrTy;
@@ -89,6 +83,9 @@ public:
   bool VisitArrayInitIndexExpr(const ArrayInitIndexExpr *E);
   bool VisitOpaqueValueExpr(const OpaqueValueExpr *E);
   bool VisitAbstractConditionalOperator(const AbstractConditionalOperator *E);
+  bool VisitStringLiteral(const StringLiteral *E);
+  bool VisitCharacterLiteral(const CharacterLiteral *E);
+  bool VisitCompoundAssignOperator(const CompoundAssignOperator *E);
 
 protected:
   bool visitExpr(const Expr *E) override;
@@ -237,17 +234,24 @@ private:
   /// Emits an integer constant.
   template <typename T> bool emitConst(const Expr *E, T Value) {
     QualType Ty = E->getType();
-    APInt WrappedValue(getIntWidth(Ty), Value, std::is_signed<T>::value);
+    APInt WrappedValue(getIntWidth(Ty), static_cast<uint64_t>(Value),
+                       std::is_signed<T>::value);
     return emitConst(*Ctx.classify(Ty), WrappedValue, E);
   }
-
-  /// Returns the index of a global.
-  llvm::Optional<unsigned> getGlobalIdx(const VarDecl *VD);
 
   /// Emits the initialized pointer.
   bool emitInitFn() {
     assert(InitFn && "missing initializer");
     return (*InitFn)();
+  }
+
+  /// Returns the CXXRecordDecl for the type of the given expression,
+  /// or nullptr if no such decl exists.
+  const CXXRecordDecl *getRecordDecl(const Expr *E) const {
+    QualType T = E->getType();
+    if (const auto *RD = T->getPointeeCXXRecordDecl())
+      return RD;
+    return T->getAsCXXRecordDecl();
   }
 
 protected:
