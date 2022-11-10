@@ -2595,9 +2595,9 @@ static bool isElementwiseGeneric(LinalgOp op) {
     return false;
   if (op.getNumParallelLoops() != op.getNumLoops())
     return false;
-  if (op.getNumOutputs() != 1)
+  if (op.getNumDpsInits() != 1)
     return false;
-  return op.getMatchingIndexingMap(op.getOutputOperand(0)).isPermutation();
+  return op.getMatchingIndexingMap(op.getDpsInitOperand(0)).isPermutation();
 }
 
 namespace {
