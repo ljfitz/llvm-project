@@ -138,7 +138,7 @@ static FailureOr<Value> padOperandToSmallestStaticBoundingBox(
   OpOperand *currOpOperand = opOperand;
   while (auto linalgOp = currOpOperand->get().getDefiningOp<LinalgOp>()) {
     OpResult result = currOpOperand->get().cast<OpResult>();
-    currOpOperand = linalgOp.getOutputOperand(result.getResultNumber());
+    currOpOperand = linalgOp.getDpsInitOperand(result.getResultNumber());
   }
 
   // Fail if `currOpOperand` is not defined by an ExtractSliceOp.
@@ -203,10 +203,10 @@ linalg::rewriteAsPaddedOp(OpBuilder &b, LinalgOp opToPad,
   b.setInsertionPointAfter(opToPad);
   // Make a copy of the shaped operands and update it.
   SmallVector<Value> newOperands;
-  newOperands.reserve(opToPad.getNumInputsAndOutputs());
-  for (OpOperand *opOperand : opToPad.getInputAndOutputOperands()) {
+  newOperands.reserve(opToPad->getNumOperands());
+  for (OpOperand &opOperand : opToPad->getOpOperands()) {
     FailureOr<Value> paddedOperand = padOperandToSmallestStaticBoundingBox(
-        b, opToPad, opOperand, paddingDimensions, paddingValues, packPaddings);
+        b, opToPad, &opOperand, paddingDimensions, paddingValues, packPaddings);
     // Exit if `paddingDimensions` cannot be bounded statically.
     if (failed(paddedOperand))
       return failure();
@@ -222,7 +222,7 @@ linalg::rewriteAsPaddedOp(OpBuilder &b, LinalgOp opToPad,
 
   // Clone `opToPad` to operate on the statically padded shapes.
   auto resultTensorTypes =
-      ValueRange(newOperands).take_back(opToPad.getNumOutputs()).getTypes();
+      ValueRange(newOperands).take_back(opToPad.getNumDpsInits()).getTypes();
   paddedOp = opToPad.clone(b, loc, resultTensorTypes, newOperands);
 
   // Recover the slice out of the new static results. This keeps the original
@@ -327,15 +327,15 @@ mlir::linalg::LinalgPaddingPattern::returningMatchAndRewrite(
 
   // Hoist the padding.
   for (const auto &en : enumerate(options.hoistPaddings)) {
-    if (static_cast<int64_t>(en.index()) >= paddedOp.getNumInputsAndOutputs())
+    if (static_cast<int64_t>(en.index()) >= paddedOp->getNumOperands())
       break;
-    OpOperand *opOperand = &paddedOp->getOpOperand(en.index());
-    auto padOp = opOperand->get().getDefiningOp<tensor::PadOp>();
+    OpOperand &opOperand = paddedOp->getOpOperand(en.index());
+    auto padOp = opOperand.get().getDefiningOp<tensor::PadOp>();
     if (!padOp || en.value() == 0)
       continue;
 
     // Fail hoisting if the operand shape is not fully static.
-    if (llvm::any_of(paddedOp.getShape(opOperand), ShapedType::isDynamic))
+    if (llvm::any_of(paddedOp.getShape(&opOperand), ShapedType::isDynamic))
       return failure();
 
     tensor::PadOp hoistedOp;

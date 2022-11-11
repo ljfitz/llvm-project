@@ -1118,6 +1118,9 @@ void UnwrappedLineParser::parsePPDirective() {
   case tok::pp_endif:
     parsePPEndIf();
     break;
+  case tok::pp_pragma:
+    parsePPPragma();
+    break;
   default:
     parsePPUnknown();
     break;
@@ -1212,9 +1215,12 @@ void UnwrappedLineParser::parsePPElse() {
   // If a potential include guard has an #else, it's not an include guard.
   if (IncludeGuard == IG_Defined && PPBranchLevel == 0)
     IncludeGuard = IG_Rejected;
+  // Don't crash when there is an #else without an #if.
+  assert(PPBranchLevel >= -1);
+  if (PPBranchLevel == -1)
+    conditionalCompilationStart(/*Unreachable=*/true);
   conditionalCompilationAlternative();
-  if (PPBranchLevel > -1)
-    --PPBranchLevel;
+  --PPBranchLevel;
   parsePPUnknown();
   ++PPBranchLevel;
 }
@@ -1278,6 +1284,11 @@ void UnwrappedLineParser::parsePPDefine() {
   // re-indentation if there was a structural error) within the macro
   // definition.
   parseFile();
+}
+
+void UnwrappedLineParser::parsePPPragma() {
+  Line->InPragmaDirective = true;
+  parsePPUnknown();
 }
 
 void UnwrappedLineParser::parsePPUnknown() {

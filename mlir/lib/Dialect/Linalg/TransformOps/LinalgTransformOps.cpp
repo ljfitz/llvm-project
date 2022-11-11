@@ -375,10 +375,18 @@ static Operation *tileAndFuseFirstExtractUseThroughContainingOpBlockArgument(
   int64_t resultNumber = pUse->get().cast<OpResult>().getResultNumber();
   LLVM_DEBUG(llvm::dbgs() << "resultNumber: " << resultNumber << "\n");
 
-  auto destinationOperands = tileableProducer.getDestinationOperands(rewriter);
+  // Gather destination tensors.
+  SmallVector<Value> destinationTensors;
+  if (failed(tensor::getOrCreateDestinations(
+          rewriter, tileableProducer->getLoc(), tileableProducer,
+          destinationTensors))) {
+    diag.attachNote(tileableProducer->getLoc())
+        << "failed to get destination tensors for: " << *tileableProducer;
+    return nullptr;
+  }
 
   BlockAndValueMapping bvm;
-  bvm.map(destinationOperands[resultNumber], bbArg);
+  bvm.map(destinationTensors[resultNumber], bbArg);
   auto tileableProducerClone =
       cast<TilingInterface>(rewriter.clone(*tileableProducer, bvm));
   auto scopeGuard =
@@ -403,7 +411,7 @@ static Operation *tileAndFuseFirstExtractUseThroughContainingOpBlockArgument(
   // Replace the use in containingOp.
   rewriter.updateRootInPlace(containingOp, [&]() {
     containingOp->setOperand(pUse->getOperandNumber(),
-                             destinationOperands.front());
+                             destinationTensors.front());
   });
 
   return fusedOp;
@@ -470,10 +478,9 @@ transform::FuseIntoContainingOp::apply(transform::TransformResults &results,
   }
   ArrayRef<Operation *> containingOps = state.getPayloadOps(getContainingOp());
   if (containingOps.size() != 1) {
-    // Definite failure.
-    return DiagnosedSilenceableFailure(
-        this->emitOpError("requires exactly one containing_op handle (got ")
-        << containingOps.size() << ")");
+    return emitDefiniteFailure()
+           << "requires exactly one containing_op handle (got "
+           << containingOps.size() << ")";
   }
   Operation *containingOp = containingOps.front();
 
@@ -925,11 +932,11 @@ DiagnosedSilenceableFailure SplitOp::apply(TransformResults &results,
     }
 
     if (splitPoints.size() != payload.size()) {
-      emitError() << "expected the dynamic split point handle to point to as "
-                     "many operations ("
-                  << splitPoints.size() << ") as the target handle ("
-                  << payload.size() << ")";
-      return DiagnosedSilenceableFailure::definiteFailure();
+      return emitDefiniteFailure()
+             << "expected the dynamic split point handle to point to as "
+                "many operations ("
+             << splitPoints.size() << ") as the target handle ("
+             << payload.size() << ")";
     }
   } else {
     splitPoints.resize(payload.size(),
@@ -1051,7 +1058,7 @@ transform::SplitReductionOp::applyToOne(linalg::LinalgOp target,
   ControlSplitReductionFn splitFn = [&](LinalgOp) {
     return linalg::SplitReductionOptions{int64_t(getSplitFactor()),
                                          unsigned(getInsertSplitDimension()),
-                                         /*innerParallel=*/false};
+                                         bool(getInnerParallel())};
   };
   SimpleRewriter rewriter(getContext());
   rewriter.setInsertionPoint(target);
