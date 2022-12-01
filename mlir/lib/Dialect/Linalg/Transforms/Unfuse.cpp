@@ -105,8 +105,8 @@ Value unfuse2DConvolution(OpBuilder &builder, Operation *op, Value ifm,
       weights.getType().cast<RankedTensorType>(), dilationAttr, strideAttr);
 
   // Ensure we have an appropriately sized destination operand.
-  Value dest = builder.create<tensor::EmptyOp>(op->getLoc(), resultTy.getShape(),
-                                            resultTy.getElementType());
+  Value dest = builder.create<tensor::EmptyOp>(
+      op->getLoc(), resultTy.getShape(), resultTy.getElementType());
 
   // Apply the bias to dest.
   //  - We do this before the convolution, since we assume this is the canonical
