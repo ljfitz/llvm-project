@@ -523,8 +523,9 @@ Value sumKeepDim(OpBuilder &builder, Location loc, Value in, unsigned dim) {
   AffineMap indexingMaps[] = {inMap, outMap};
 
   // Compute the iterator types.
-  SmallVector<StringRef> iteratorTypes(rank, "parallel");
-  iteratorTypes.back() = "reduction";
+  SmallVector<utils::IteratorType> iteratorTypes(rank,
+                                                 utils::IteratorType::parallel);
+  iteratorTypes.back() = utils::IteratorType::reduction;
 
   return builder
       .create<linalg::GenericOp>(
@@ -580,7 +581,8 @@ struct SoftmaxLowering : OpRewritePattern<SoftmaxOp> {
                                              rank, rewriter.getContext())};
 
       // Compute the iterator types.
-      SmallVector<StringRef> iteratorTypes(rank, "parallel");
+      SmallVector<utils::IteratorType> iteratorTypes(
+          rank, utils::IteratorType::parallel);
 
       rewriter.replaceOpWithNewOp<linalg::GenericOp>(
           op,
