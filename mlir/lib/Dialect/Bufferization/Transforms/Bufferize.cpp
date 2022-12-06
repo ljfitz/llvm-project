@@ -13,7 +13,7 @@
 #include "mlir/Dialect/Bufferization/Transforms/Bufferize.h"
 #include "mlir/Dialect/Bufferization/Transforms/OneShotAnalysis.h"
 #include "mlir/Dialect/Bufferization/Transforms/OneShotModuleBufferize.h"
-#include "mlir/Dialect/Bufferization/Transforms/TensorCopyInsertion.h"
+#include "mlir/Dialect/Bufferization/Transforms/Transforms.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/Operation.h"
@@ -29,6 +29,8 @@ namespace bufferization {
 #include "mlir/Dialect/Bufferization/Transforms/Passes.h.inc"
 } // namespace bufferization
 } // namespace mlir
+
+#define DEBUG_TYPE "bufferize"
 
 using namespace mlir;
 using namespace mlir::bufferization;
@@ -436,23 +438,33 @@ LogicalResult bufferization::bufferizeOp(Operation *op,
   BufferizationRewriter rewriter(op->getContext(), erasedOps, toMemrefOps,
                                  worklist, options, opFilter);
   for (unsigned i = 0; i < worklist.size(); ++i) {
-    Operation *op = worklist[i];
+    Operation *nextOp = worklist[i];
     // Skip ops that were erased.
-    if (erasedOps.contains(op))
+    if (erasedOps.contains(nextOp))
       continue;
     // Skip ops that are not bufferizable or not allowed.
-    auto bufferizableOp = options.dynCastBufferizableOp(op);
+    auto bufferizableOp = options.dynCastBufferizableOp(nextOp);
     if (!bufferizableOp)
       continue;
-    if (opFilter && !opFilter->isOpAllowed(op))
+    if (opFilter && !opFilter->isOpAllowed(nextOp))
       continue;
     // Skip ops that no longer have tensor semantics.
-    if (!hasTensorSemantics(op))
+    if (!hasTensorSemantics(nextOp))
       continue;
     // Bufferize the op.
-    rewriter.setInsertionPoint(op);
-    if (failed(bufferizableOp.bufferize(rewriter, options)))
-      return op->emitError("failed to bufferize op");
+    LLVM_DEBUG(llvm::dbgs()
+               << "//===-------------------------------------------===//\n"
+               << "IR after bufferizing: " << nextOp->getName() << "\n");
+    rewriter.setInsertionPoint(nextOp);
+    if (failed(bufferizableOp.bufferize(rewriter, options))) {
+      LLVM_DEBUG(llvm::dbgs()
+                 << "failed to bufferize\n"
+                 << "//===-------------------------------------------===//\n");
+      return nextOp->emitError("failed to bufferize op");
+    }
+    LLVM_DEBUG(llvm::dbgs()
+               << *op
+               << "\n//===-------------------------------------------===//\n");
   }
 
   // Fold all to_memref(to_tensor(x)) pairs.

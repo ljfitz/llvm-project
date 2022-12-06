@@ -12,13 +12,16 @@
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/DeviceMappingInterface.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BlockAndValueMapping.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/FunctionInterfaces.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Support/MathExtras.h"
 #include "mlir/Transforms/InliningUtils.h"
+#include "llvm/ADT/TypeSwitch.h"
 
 using namespace mlir;
 using namespace mlir::scf;
@@ -762,13 +765,13 @@ struct SimplifyTrivialLoops : public OpRewritePattern<ForOp> {
       return success();
     }
 
-    IntegerAttr step;
-    if (!matchPattern(op.getStep(), m_Constant(&step)))
+    llvm::Optional<llvm::APInt> maybeStepValue = op.getConstantStep();
+    if (!maybeStepValue)
       return failure();
 
     // If the loop is known to have 1 iteration, inline its body and remove the
     // loop.
-    llvm::APInt stepValue = step.getValue();
+    llvm::APInt stepValue = *maybeStepValue;
     if (stepValue.sge(*diff)) {
       SmallVector<Value, 4> blockArgs;
       blockArgs.reserve(op.getNumIterOperands() + 1);
@@ -1065,6 +1068,25 @@ void ForOp::getCanonicalizationPatterns(RewritePatternSet &results,
               LastTensorLoadCanonicalization, ForOpTensorCastFolder>(context);
 }
 
+Optional<APInt> ForOp::getConstantStep() {
+  IntegerAttr step;
+  if (matchPattern(getStep(), m_Constant(&step)))
+    return step.getValue();
+  return {};
+}
+
+Speculation::Speculatability ForOp::getSpeculatability() {
+  // `scf.for (I = Start; I < End; I += 1)` terminates for all values of Start
+  // and End.
+  if (auto constantStep = getConstantStep())
+    if (*constantStep == 1)
+      return Speculation::RecursivelySpeculatable;
+
+  // For Step != 1, the loop may not terminate.  We can add more smarts here if
+  // needed.
+  return Speculation::NotSpeculatable;
+}
+
 //===----------------------------------------------------------------------===//
 // ForeachThreadOp
 //===----------------------------------------------------------------------===//
@@ -1092,6 +1114,12 @@ LogicalResult ForeachThreadOp::verify() {
     if (body->getArgument(i + getRank()).getType() != getOutputs()[i].getType())
       return emitOpError("type mismatch between ")
              << i << "-th output and corresponding block argument";
+   if (getMapping().has_value())
+    for (auto map : getMapping()->getValue()) {
+      if (!isa<DeviceMappingAttrInterface>(map))
+        return emitOpError()
+               << getMappingAttrName() << " is not device mapping attribute";
+    }
 
   return success();
 }
@@ -1181,11 +1209,14 @@ ParseResult ForeachThreadOp::parse(OpAsmParser &parser,
 void ForeachThreadOp::build(mlir::OpBuilder &builder,
                             mlir::OperationState &result, ValueRange outputs,
                             ValueRange numThreads,
-                            ArrayRef<int64_t> threadDimMapping) {
+                            Optional<ArrayAttr> mapping) {
   result.addOperands(numThreads);
   result.addOperands(outputs);
-  result.addAttribute(ForeachThreadOp::getThreadDimMappingAttrName(result.name),
-                      builder.getI64ArrayAttr(threadDimMapping));
+  if (mapping.has_value()) {
+    result.addAttribute(ForeachThreadOp::getMappingAttrName(result.name),
+                        mapping.value());
+  }
+
   result.addAttribute(
       "operand_segment_sizes",
       builder.getDenseI32ArrayAttr({static_cast<int32_t>(numThreads.size()),
@@ -1212,12 +1243,12 @@ void ForeachThreadOp::build(mlir::OpBuilder &builder,
 // Builder that takes a bodyBuilder lambda.
 void ForeachThreadOp::build(
     mlir::OpBuilder &builder, mlir::OperationState &result, ValueRange outputs,
-    ValueRange numThreads, ArrayRef<int64_t> threadDimMapping,
+    ValueRange numThreads, ArrayRef<Attribute> mapping,
     function_ref<void(OpBuilder &, Location, ValueRange)> bodyBuilder) {
   result.addOperands(numThreads);
   result.addOperands(outputs);
-  result.addAttribute(ForeachThreadOp::getThreadDimMappingAttrName(result.name),
-                      builder.getI64ArrayAttr(threadDimMapping));
+  result.addAttribute(ForeachThreadOp::getMappingAttrName(result.name),
+                      builder.getArrayAttr(mapping));
   result.addAttribute(
       "operand_segment_sizes",
       builder.getDenseI32ArrayAttr({static_cast<int32_t>(numThreads.size()),
@@ -1271,51 +1302,51 @@ static FailureOr<SmallVector<T>> permute(const SmallVector<T> &vals,
   SmallVector<T> result(vals.size());
   SmallVector<bool> seen(vals.size());
   for (auto [idx, val] : llvm::zip(perm, vals)) {
-    // Already seen, invalid thread_dim_mapping.
+    // Already seen, invalid mapping.
     if (seen[idx])
       return failure();
     result[idx] = val;
     seen[idx] = true;
   }
-  // Some not seen, invalid thread_dim_mapping.
+  // Some not seen, invalid mapping.
   if (!llvm::all_of(seen, [](bool b) { return b; }))
     return failure();
   return result;
 }
 
-/// Helper to get apply the `thread_dim_mapping` permutation of a
+/// Helper to get apply the `mapping` permutation of a
 /// `foreachThreadOp` to `values`.
 template <typename T>
 static FailureOr<SmallVector<T>>
 getValuesPermutedByThreadMapping(scf::ForeachThreadOp foreachThreadOp,
-                                 const SmallVector<T> &values) {
+                                 const SmallVector<T> &values,
+                                 ArrayRef<int64_t> mapping) {
   // Apply mapping permutation if specified.
-  auto mapping = foreachThreadOp.getThreadDimMapping();
-  if (mapping && !mapping.empty()) {
-    auto maybePermuted = permute(values, extractFromI64ArrayAttr(mapping));
-    if (failed(maybePermuted))
-      return foreachThreadOp->emitError("invalid permutation");
-    return *maybePermuted;
-  }
+  FailureOr<SmallVector<T>> maybePermuted = permute(values, mapping);
+  if (failed(maybePermuted))
+    return foreachThreadOp->emitError("invalid permutation");
+  return *maybePermuted;
   return values;
 }
 
-/// Return the thread indices in the order specified by the thread_dim_mapping
-/// attribute. Return failure is thread_dim_mapping is not a valid permutation.
-FailureOr<SmallVector<Value>> ForeachThreadOp::getPermutedThreadIndices() {
+/// Return the thread indices in the order specified by the mapping
+/// attribute. Return failure is mapping is not a valid permutation.
+FailureOr<SmallVector<Value>>
+ForeachThreadOp::getPermutedThreadIndices(ArrayRef<int64_t> mapping) {
   SmallVector<Value> threadCountValues = this->getThreadIndices();
   threadCountValues.resize(3, Value());
-  return getValuesPermutedByThreadMapping(*this, threadCountValues);
+  return getValuesPermutedByThreadMapping(*this, threadCountValues, mapping);
 }
 
 /// Return the number of threads in the order specified by the
-/// thread_dim_mapping attribute.
-/// Return failure is thread_dim_mapping is not a valid permutation.
+/// mapping attribute.
+/// Return failure is mapping is not a valid permutation.
 FailureOr<SmallVector<OpFoldResult>>
-ForeachThreadOp::getPermutedNumThreads(OpBuilder &b) {
+ForeachThreadOp::getPermutedNumThreads(OpBuilder &b,
+                                       ArrayRef<int64_t> mapping) {
   SmallVector<OpFoldResult> threadCountValues = this->getNumThreads();
   threadCountValues.resize(3, b.getIndexAttr(1));
-  return getValuesPermutedByThreadMapping(*this, threadCountValues);
+  return getValuesPermutedByThreadMapping(*this, threadCountValues, mapping);
 }
 
 ForeachThreadOp mlir::scf::getForeachThreadOpThreadIndexOwner(Value val) {
@@ -1354,7 +1385,7 @@ LogicalResult PerformConcurrentlyOp::verify() {
     // Verify that inserts are into out block arguments.
     Value dest = cast<tensor::ParallelInsertSliceOp>(op).getDest();
     ArrayRef<BlockArgument> regionOutArgs = foreachThreadOp.getRegionOutArgs();
-    if (llvm::find(regionOutArgs, dest) == regionOutArgs.end())
+    if (!llvm::is_contained(regionOutArgs, dest))
       return op.emitOpError("may only insert into an output block argument");
   }
   return success();
@@ -3397,8 +3428,7 @@ parseSwitchCases(OpAsmParser &p, DenseI64ArrayAttr &cases,
   SmallVector<int64_t> caseValues;
   while (succeeded(p.parseOptionalKeyword("case"))) {
     int64_t value;
-    Region &region =
-        *caseRegions.emplace_back(std::make_unique<Region>()).get();
+    Region &region = *caseRegions.emplace_back(std::make_unique<Region>());
     if (p.parseInteger(value) || p.parseRegion(region, /*arguments=*/{}))
       return failure();
     caseValues.push_back(value);
@@ -3510,7 +3540,7 @@ void IndexSwitchOp::getRegionInvocationBounds(
   }
 
   unsigned liveIndex = getNumRegions() - 1;
-  auto it = llvm::find(getCases(), operandValue.getInt());
+  const auto *it = llvm::find(getCases(), operandValue.getInt());
   if (it != getCases().end())
     liveIndex = std::distance(getCases().begin(), it);
   for (unsigned i = 0, e = getNumRegions(); i < e; ++i)

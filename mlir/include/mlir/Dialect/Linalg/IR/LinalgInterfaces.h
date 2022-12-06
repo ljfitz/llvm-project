@@ -57,6 +57,7 @@ raw_ostream& operator<<(raw_ostream &os, OperatorClass value);
 
 OperatorClass classifyOperator(Operation *op);
 
+class IteratorTypeAttr;
 class LinalgOp;
 
 namespace detail {
