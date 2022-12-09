@@ -1386,7 +1386,7 @@ def linear_relu(
     O=TensorDef(T1,  S.W, S.K, output=True)):
   """Performs a linear/fully-connected + relu operation
 
-  This is a long description that I'll fill later
+  Performs a linear operation followed by a Relu
 
   Layout:
     * I: WH (Input)
@@ -1412,3 +1412,4 @@ def relu_nc(
   OFM[D.b, D.c] = BinaryFn.max_signed(
     IFM[D.b, D.c], TypeFn.cast_signed(T1, const(0.0))
   )
+
