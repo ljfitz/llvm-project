@@ -651,12 +651,9 @@ struct GlobalAveragePool2DLowering : OpRewritePattern<GlobalAveragePool2DOp> {
   }
 };
 
-/// Torch MLIR does a similar lowering for their Linear operator to lin alg
-/// here we implement the same so we can run tests using the unfused version
-struct LinearLowering : OpRewritePattern<LinearOp> {
-  using OpRewritePattern<LinearOp>::OpRewritePattern;
-  LogicalResult matchAndRewrite(LinearOp op,
-                                PatternRewriter &rewriter) const override {
+template <class Linear>
+static Value unfuseLinear(Linear &op, PatternRewriter &rewriter) {
+    
     Location loc = op.getLoc();
     Value input = op.getOperand(0);
     Value weights = op.getOperand(1);
@@ -691,48 +688,29 @@ struct LinearLowering : OpRewritePattern<LinearOp> {
             ->getResult(0);
 
     // Create the matmul operation that does the multiplcation and addition
-    rewriter.replaceOpWithNewOp<MatmulOp>(op, output.getType(),
-                                          ValueRange{input, transposeWeightsOp},
-                                          broadcastBiasOp);
-
+    auto newOp = rewriter.create<MatmulOp>(loc, outputType, ValueRange{op.getOperand(0), transposeWeightsOp},
+                  broadcastBiasOp).getResult(0);
+    return newOp;
+}
+/// Torch MLIR does a similar lowering for their Linear operator to lin alg
+/// here we implement the same so we can run tests using the unfused version
+struct LinearLowering : OpRewritePattern<LinearOp> {
+  using OpRewritePattern<LinearOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(LinearOp op,
+                                PatternRewriter &rewriter) const override {
+    Value matmul = unfuseLinear<LinearOp>(op, rewriter);
+    rewriter.replaceOp(op, matmul);
     return success();
   }
 };
+
 
 struct LinearReluLowering : OpRewritePattern<LinearReluOp> {
   using OpRewritePattern<LinearReluOp>::OpRewritePattern;
   LogicalResult matchAndRewrite(LinearReluOp op,
                                 PatternRewriter &rewriter) const override {
-    Location loc = op.getLoc();
-    Value weights = op.getOperand(1);
-    Value bias = op.getOperand(2);
 
-    auto weightsType = weights.getType().cast<RankedTensorType>();
-    auto biasType = bias.getType().cast<RankedTensorType>();
-    auto outputType = op->getResult(0).getType().cast<RankedTensorType>();
-
-    // Create a linalg op that transposes the weights tensor
-    // The transposedWeights is simply used to describe the output shape.
-    llvm::ArrayRef<int64_t> weightsShape = weightsType.getShape();
-    Value transposedWeights = rewriter.create<tensor::EmptyOp>(
-        loc,
-        ArrayRef<int64_t>{weightsShape[1], weightsShape[0]},
-        weightsType.getElementType());
-    Value transposeWeightsOp =
-        rewriter.create<Transpose2DOp>(loc, weights, transposedWeights)
-            ->getResult(0);
-
-    // Create a linalg op that broadcasts the 1D bias values across
-    // the 2nd dimension
-    Value broadcastedBias = rewriter.create<tensor::EmptyOp>(
-        loc, outputType.getShape(), biasType.getElementType());
-    Value broadcastBiasOp =
-        rewriter.create<Broadcast1DTo2DOp>(loc, bias, broadcastedBias)
-            ->getResult(0);
-
-    auto linearResult = rewriter.create<MatmulOp>(loc,
-                  outputType, ValueRange{op.getOperand(0), transposeWeightsOp},
-                  broadcastBiasOp).getResult(0);
+    Value linearResult = unfuseLinear<LinearReluOp>(op, rewriter);
 
     rewriter.replaceOpWithNewOp<Relu2DNchwOp>(
         op,
