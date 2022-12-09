@@ -452,3 +452,23 @@ func.func @unfuse_linear(%input: tensor<1x2048xf32>, %weights: tensor<1000x2048x
 
     return %result : tensor<1x1000xf32>
 }
+
+// -----
+
+// CHECK:  func.func @unfuse_linearRelu
+// CHECK-SAME: %[[input:.+]]: tensor<1x2048xf32>, %[[weights:.+]]: tensor<1000x2048xf32>, %[[bias:.+]]: tensor<1000xf32>
+func.func @unfuse_linearRelu(%input: tensor<1x2048xf32>, %weights: tensor<1000x2048xf32>, %bias: tensor<1000xf32>) -> tensor<1x1000xf32> {
+    %zero = arith.constant 0.0 : f32
+    %init = tensor.splat %zero : tensor<1x1000xf32>
+    %result = linalg.linear_relu ins(%input, %weights, %bias: tensor<1x2048xf32>, tensor<1000x2048xf32>, tensor<1000xf32>) outs(%init: tensor<1x1000xf32>) -> tensor<1x1000xf32>
+
+// CHECK:  %[[tweightshape:.+]] = tensor.empty() : tensor<2048x1000xf32>
+// CHECK:  %[[tweights:.+]] = linalg.transpose2d ins(%arg1 : tensor<1000x2048xf32>) outs(%0 : tensor<2048x1000xf32>) -> tensor<2048x1000xf32>
+// CHECK:  %[[bias2dshape:.+]] = tensor.empty() : tensor<1x1000xf32>
+// CHECK:  %[[bias2d:.+]] = linalg.broadcast_1d_to_2d ins(%arg2 : tensor<1000xf32>) outs(%2 : tensor<1x1000xf32>) -> tensor<1x1000xf32>
+// CHECK:  %[[matmul:.+]] = linalg.matmul ins(%[[input]], %[[tweights]] : tensor<1x2048xf32>, tensor<2048x1000xf32>) outs(%[[bias2d]] : tensor<1x1000xf32>) -> tensor<1x1000xf32
+// CHECK:  %[[out:.*]] = linalg.relu_nc ins(%[[matmul]] : tensor<1x1000xf32>) outs(%[[matmul]] : tensor<1x1000xf32>) -> tensor<1x1000xf32>
+// CHECK: return %[[out]]
+
+    return %result : tensor<1x1000xf32>
+}

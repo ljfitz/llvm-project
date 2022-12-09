@@ -712,7 +712,7 @@ struct LinearReluLowering : OpRewritePattern<LinearReluOp> {
 
     Value linearResult = unfuseLinear<LinearReluOp>(op, rewriter);
 
-    rewriter.replaceOpWithNewOp<Relu2DNchwOp>(
+    rewriter.replaceOpWithNewOp<ReluNcOp>(
         op,
         /*resultTensorTypes=*/linearResult.getType(),
         /*inputs=*/linearResult,
@@ -734,7 +734,8 @@ struct LinalgUnfusePass : public impl::LinalgUnfuseBase<LinalgUnfusePass> {
                  Conv2DTensorAddLreluAveragePoolLowering,
                  Conv2DActivationMaxpoolOpLowering<Conv2DLreluMaxpoolOp>,
                  Conv2DActivationMaxpoolOpLowering<Conv2DReluMaxpoolOp>,
-                 SoftmaxLowering, GlobalAveragePool2DLowering, LinearLowering>(
+                 SoftmaxLowering, GlobalAveragePool2DLowering, LinearLowering,
+                 LinearReluLowering>(
         &getContext());
 
     (void)applyPatternsAndFoldGreedily(getOperation().getBody(),
