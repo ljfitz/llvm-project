@@ -24,6 +24,7 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 
@@ -650,12 +651,9 @@ struct GlobalAveragePool2DLowering : OpRewritePattern<GlobalAveragePool2DOp> {
   }
 };
 
-/// Torch MLIR does a similar lowering for their Linear operator to lin alg
-/// here we implement the same so we can run tests using the unfused version
-struct LinearLowering : OpRewritePattern<LinearOp> {
-  using OpRewritePattern<LinearOp>::OpRewritePattern;
-  LogicalResult matchAndRewrite(LinearOp op,
-                                PatternRewriter &rewriter) const override {
+template <class Linear>
+static Value unfuseLinear(Linear &op, PatternRewriter &rewriter) {
+    
     Location loc = op.getLoc();
     Value input = op.getOperand(0);
     Value weights = op.getOperand(1);
@@ -690,10 +688,35 @@ struct LinearLowering : OpRewritePattern<LinearOp> {
             ->getResult(0);
 
     // Create the matmul operation that does the multiplcation and addition
-    rewriter.replaceOpWithNewOp<MatmulOp>(op, output.getType(),
-                                          ValueRange{input, transposeWeightsOp},
-                                          broadcastBiasOp);
+    auto newOp = rewriter.create<MatmulOp>(loc, outputType, ValueRange{op.getOperand(0), transposeWeightsOp},
+                  broadcastBiasOp).getResult(0);
+    return newOp;
+}
+/// Torch MLIR does a similar lowering for their Linear operator to lin alg
+/// here we implement the same so we can run tests using the unfused version
+struct LinearLowering : OpRewritePattern<LinearOp> {
+  using OpRewritePattern<LinearOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(LinearOp op,
+                                PatternRewriter &rewriter) const override {
+    Value matmul = unfuseLinear<LinearOp>(op, rewriter);
+    rewriter.replaceOp(op, matmul);
+    return success();
+  }
+};
 
+
+struct LinearReluLowering : OpRewritePattern<LinearReluOp> {
+  using OpRewritePattern<LinearReluOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(LinearReluOp op,
+                                PatternRewriter &rewriter) const override {
+
+    Value linearResult = unfuseLinear<LinearReluOp>(op, rewriter);
+
+    rewriter.replaceOpWithNewOp<ReluNcOp>(
+        op,
+        /*resultTensorTypes=*/linearResult.getType(),
+        /*inputs=*/linearResult,
+        /*outputs=*/linearResult);
     return success();
   }
 };
@@ -711,7 +734,8 @@ struct LinalgUnfusePass : public impl::LinalgUnfuseBase<LinalgUnfusePass> {
                  Conv2DTensorAddLreluAveragePoolLowering,
                  Conv2DActivationMaxpoolOpLowering<Conv2DLreluMaxpoolOp>,
                  Conv2DActivationMaxpoolOpLowering<Conv2DReluMaxpoolOp>,
-                 SoftmaxLowering, GlobalAveragePool2DLowering, LinearLowering>(
+                 SoftmaxLowering, GlobalAveragePool2DLowering, LinearLowering,
+                 LinearReluLowering>(
         &getContext());
 
     (void)applyPatternsAndFoldGreedily(getOperation().getBody(),
