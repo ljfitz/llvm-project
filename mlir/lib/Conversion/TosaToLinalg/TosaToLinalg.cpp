@@ -1522,9 +1522,9 @@ public:
       xScaleD =
           rewriter.create<arith::UIToFPOp>(loc, rewriter.getF32Type(), xScaleD);
       yOffset =
-          rewriter.create<arith::UIToFPOp>(loc, rewriter.getF32Type(), yOffset);
+          rewriter.create<arith::SIToFPOp>(loc, rewriter.getF32Type(), yOffset);
       xOffset =
-          rewriter.create<arith::UIToFPOp>(loc, rewriter.getF32Type(), xOffset);
+          rewriter.create<arith::SIToFPOp>(loc, rewriter.getF32Type(), xOffset);
 
       y = rewriter.create<arith::MulFOp>(loc, y, yScaleD);
       x = rewriter.create<arith::MulFOp>(loc, x, xScaleD);
