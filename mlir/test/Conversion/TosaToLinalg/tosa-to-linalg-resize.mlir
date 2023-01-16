@@ -319,8 +319,8 @@ func.func @resize_nearest_fp(%input: tensor<1x50x48x1xf32>) -> () {
   // CHECK: %[[SCALE_Y_D:.*]] = arith.uitofp %[[ISCALE_Y_D]]
   // CHECK: %[[SCALE_X_N:.*]] = arith.uitofp %[[ISCALE_X_N]]
   // CHECK: %[[SCALE_X_D:.*]] = arith.uitofp %[[ISCALE_X_D]]
-  // CHECK: %[[OFFSET_Y:.*]] = arith.uitofp %[[IOFFSET_Y]]
-  // CHECK: %[[OFFSET_X:.*]] = arith.uitofp %[[IOFFSET_X]]
+  // CHECK: %[[OFFSET_Y:.*]] = arith.sitofp %[[IOFFSET_Y]]
+  // CHECK: %[[OFFSET_X:.*]] = arith.sitofp %[[IOFFSET_X]]
 
   // CHECK: %[[VAL_29:.*]] = arith.mulf %[[Y0]], %[[SCALE_Y_D]]
   // CHECK: %[[VAL_30:.*]] = arith.mulf %[[X0]], %[[SCALE_X_D]]
@@ -397,8 +397,8 @@ func.func @resize_bilinear_fp(%input: tensor<1x23x23x1xf32>) -> () {
   // CHECK: %[[SCALE_Y_D:.*]] = arith.uitofp %[[ISCALE_Y_D]]
   // CHECK: %[[SCALE_X_N:.*]] = arith.uitofp %[[ISCALE_X_N]]
   // CHECK: %[[SCALE_X_D:.*]] = arith.uitofp %[[ISCALE_X_D]]
-  // CHECK: %[[OFFSET_Y:.*]] = arith.uitofp %[[IOFFSET_Y]]
-  // CHECK: %[[OFFSET_X:.*]] = arith.uitofp %[[IOFFSET_X]]
+  // CHECK: %[[OFFSET_Y:.*]] = arith.sitofp %[[IOFFSET_Y]]
+  // CHECK: %[[OFFSET_X:.*]] = arith.sitofp %[[IOFFSET_X]]
 
   // CHECK: %[[VAL_29:.*]] = arith.mulf %[[Y0]], %[[SCALE_Y_D]]
   // CHECK: %[[VAL_30:.*]] = arith.mulf %[[X0]], %[[SCALE_X_D]]
