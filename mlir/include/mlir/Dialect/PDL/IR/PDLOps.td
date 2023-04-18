@@ -47,7 +47,7 @@ def PDL_ApplyNativeConstraintOp
 
   let arguments = (ins StrAttr:$name, Variadic<PDL_AnyType>:$args);
   let results = (outs Variadic<PDL_AnyType>:$results);
-  let assemblyFormat = "$name `(` $args `:` type($args) `)` (`->` `(` type($results)^ `)`)? attr-dict";
+  let assemblyFormat = "$name `(` $args `:` type($args) `)` (`:`  type($results)^ )? attr-dict";
   let hasVerifier = 1;
 }
 
